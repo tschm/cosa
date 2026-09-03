@@ -18,7 +18,8 @@ Subpackages:
     active_set: Working set and its updates (``working_set``, ``multipliers``, ``updates``).
     linear_algebra: KKT systems and factorizations (``kkt``, ``factorization``, ``scaling``).
     solver: The solver itself (``cosa``, ``initialization``, ``termination``).
-    experiments: Numerical studies (``portfolio``, ``frontier``, ``benchmarks``).
+    experiments: Numerical studies (``reference``, ``portfolio``, ``frontier``,
+        ``benchmarks``).
 
 Attributes:
     Vector: A one-dimensional float array, used for ``x``, ``mu``, ``b`` and ``d``.
@@ -28,6 +29,9 @@ Attributes:
 import numpy as np
 from numpy.typing import NDArray
 
+from cosa.active_set.working_set import ConeStatus, ConstraintNames, WorkingSet
+from cosa.geometry.soc import ConePosition
+from cosa.problem.portfolio import MeanStdPortfolio
 from cosa.problem.socp import (
     SIGN_CONVENTION,
     SOCP,
@@ -43,16 +47,27 @@ Matrix = NDArray[np.float64]
 
 # Deliberately narrow: every module named in the subpackage list above extends this
 # surface as it lands, rather than reserving a name in advance for code that does not
-# exist. What is here is the problem representation of `cosa.problem.socp` and the
-# array aliases every module shares.
+# exist.
+#
+# What lands here is the shared *vocabulary* -- the array aliases, the problem
+# representation, and the types that cross subpackage boundaries -- and not every public
+# name of every module. The routines stay where their context is, reached as
+# `cosa.geometry.soc.is_boundary` or `cosa.active_set.updates.removal_candidate`, because
+# their names only mean something next to their module: `cosa.slack` and `cosa.position`
+# would be unreadable at the root, and `cosa.geometry.soc.slack` is not.
 __all__ = [
     "SIGN_CONVENTION",
     "SOCP",
+    "ConePosition",
     "ConeProduct",
+    "ConeStatus",
+    "ConstraintNames",
     "Matrix",
     "MeanStdForm",
+    "MeanStdPortfolio",
     "ProblemError",
     "SecondOrderCone",
     "SignConvention",
     "Vector",
+    "WorkingSet",
 ]

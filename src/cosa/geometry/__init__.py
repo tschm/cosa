@@ -4,7 +4,7 @@ The cone is ``Q = {(t, y) : ||y|| <= t}``, and the solver reaches it only throug
 this subpackage.
 
 Modules (each owned by its own issue):
-    soc: Membership, boundary and apex predicates.
+    soc: Membership, boundary and apex predicates. Landed.
     tangent: The unit vector ``u = L @ x / ||L @ x||`` and the tangent condition
         ``tau - u.T @ L @ p = 0`` at a nonzero boundary point.
     step: The exact step interval from the scalar quadratic in ``alpha``, and its

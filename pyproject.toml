@@ -26,8 +26,42 @@ build-backend = "uv_build"
 Homepage = "https://github.com/tschm/cosa"
 Repository = "https://github.com/tschm/cosa"
 
+# The reference-solver oracle of `cosa.experiments.reference`. `reference` is the open
+# fallback and is what CI installs: the plan's cross-solver test wants *every* generated
+# problem checked against a reference solver, which a license-gated solver cannot do.
+# `mosek` and `gurobi` are the plan's named commercial solvers, extras rather than
+# dependencies precisely because they need a license the test suite must not assume.
+[project.optional-dependencies]
+reference = [
+    "clarabel>=0.9",
+    "cvxpy>=1.5",
+]
+mosek = [
+    "cosa[reference]",
+    "mosek>=10",
+]
+gurobi = [
+    "cosa[reference]",
+    "gurobipy>=11",
+]
+
+# `clarabel`, `mosek` and `gurobipy` are solver *backends*: CVXPY loads them by name at
+# solve time, so no import in `src/` can ever reference them and deptry's DEP002 ("defined
+# but not used") is correct about the letter and wrong about the intent. Ignored per
+# package rather than per rule, so DEP002 keeps working for every other dependency --
+# including the SciPy that M7 will add. `cvxpy` itself is deliberately absent from this
+# list: `cosa.experiments.reference` does import it, and if that import ever disappears
+# the gate should say so.
+[tool.deptry.per_rule_ignores]
+DEP002 = ["clarabel", "gurobipy", "mosek"]
+
 [dependency-groups]
-test = ["pytest>=8.0", "pytest-cov>=5.0"]
+test = [
+    "clarabel>=0.9",
+    "cvxpy>=1.5",
+    "pytest>=8.0",
+    "pytest-cov>=5.0",
+]
 
 [tool.bumpversion]
 current_version = "0.1.0"

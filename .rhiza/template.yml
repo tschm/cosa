@@ -3,3 +3,11 @@ ref: "v1.7.2"
 
 profiles:
   - github-project
+
+# Paths this repo owns rather than inherits. Without these entries the next
+# `/rhiza:update` would restore both, since each is template-owned and listed in
+# template.lock's `files`. Matching is by exact destination path or directory
+# prefix -- not globs -- so `.github/rulesets` covers everything beneath it.
+exclude:
+  - .github/rulesets
+  - .github/CONFIG.md

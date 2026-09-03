@@ -1,9 +1,10 @@
-"""The repeated KKT solve, and the numerical work that makes it fast and stable.
+"""KKT systems, their factorizations, and the scaling that conditions them.
 
 Modules (each owned by its own issue):
-    kkt: Assembly and solution of the working-set KKT system. The first
-        implementation refactorizes every iteration on purpose, as the reference
-        the later strategies are measured against.
-    factorization: Factorization strategies, rank detection and reuse.
-    scaling: Scaling of variables, covariance, constraints and cone variables.
+    kkt: The direction subproblem's saddle-point system of §4.3, refactorized every
+        iteration as §13.1 asks a reference implementation to be. Landed.
+    factorization: Reuse across iterations -- rank-one updates when a constraint is
+        added or dropped, and the subtler update when the SOC tangent moves.
+    scaling: Diagonal equilibration across §13.3's five named targets, with the cone's
+        one-scale-per-block constraint imposed. Landed.
 """

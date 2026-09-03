@@ -21,4 +21,5 @@ nav:
   - Home: index.md
   - Paper: paper/paper.pdf
   - Development:
+      - Architecture: development/architecture.md
       - Rhiza: development/rhiza.md

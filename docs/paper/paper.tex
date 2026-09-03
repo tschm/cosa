@@ -1,0 +1,1392 @@
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath,amssymb,amsthm,mathtools}
+\usepackage{booktabs}
+\usepackage{enumitem}
+\usepackage{hyperref}
+\usepackage{xcolor}
+
+\title{\textbf{COSA: Conic Active-Set Algorithm}\\
+\large Full Project Plan for a Conic Active-Set Solver}
+\author{}
+\date{September 2026}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+This project develops COSA, a Conic Active-Set Algorithm for
+second-order cone programs (SOCPs), with mean--standard-deviation
+portfolio optimization as the primary application. The central idea
+is to extend the classical active-set philosophy from polyhedral
+constraints to second-order cones. The portfolio problem has a
+polyhedral set of trading and exposure constraints, while standard
+deviation enters naturally through a second-order cone. The project
+will develop the mathematical foundations, numerical algorithm,
+implementation, and computational validation of this approach.
+
+The main research question is whether conic optimization problems can
+be solved effectively by explicitly identifying and maintaining the
+active geometry of the solution, rather than relying exclusively on
+interior-point methods. Particular emphasis will be placed on exact
+cone geometry, working-set updates, conic KKT conditions, numerical
+linear algebra, and warm starts for sequences of related portfolio
+problems.
+\end{abstract}
+
+\tableofcontents
+
+\newpage
+
+% ============================================================
+\section{Project Overview}
+% ============================================================
+
+\subsection{Motivation}
+
+Classical active-set methods are particularly attractive for
+optimization problems with a polyhedral feasible region. They
+maintain a working set of constraints that are believed to be active
+at the solution and repeatedly solve equality-constrained subproblems
+while adding and removing constraints.
+
+Portfolio optimization provides a natural setting in which this
+philosophy is highly relevant. Typical portfolio constraints are
+linear:
+\[
+\mathbf{1}^{\top}x=1,
+\qquad
+x\geq 0,
+\qquad
+\ell\leq x\leq u,
+\qquad
+Ax\leq b.
+\]
+
+However, the natural risk measure of interest is often standard
+deviation rather than variance:
+\[
+\sigma(x)
+=
+\sqrt{x^{\top}\Sigma x}.
+\]
+
+Standard deviation has the same physical units as expected return.
+Consequently, a risk-adjusted objective of the form
+\[
+\mu^{\top}x-\lambda\sigma(x)
+\]
+has a direct interpretation in terms of return and risk.
+
+The resulting optimization problem is convex but not a quadratic
+program. The purpose of COSA is to investigate whether its special
+second-order cone structure can be incorporated directly into an
+active-set framework.
+
+\subsection{Primary Research Question}
+
+The central question of the project is:
+
+\begin{quote}
+Can the classical active-set philosophy for polyhedral optimization
+be extended to second-order cone constraints in a way that is
+mathematically principled, numerically robust, and useful for
+structured portfolio optimization?
+\end{quote}
+
+The intended answer should include both a mathematical algorithm and
+a working implementation.
+
+\subsection{Guiding Principle}
+
+The project is guided by the following principle:
+\[
+\boxed{
+\text{Do for cones what classical active-set methods do for
+polyhedra.}
+}
+\]
+
+The objective is not simply to solve an SOCP using an existing
+general-purpose method. The goal is to understand and exploit the
+geometry of the active cone directly.
+
+% ============================================================
+\section{Mathematical Problem}
+% ============================================================
+
+\subsection{Mean--Standard-Deviation Portfolio Problem}
+
+Let
+\[
+x\in\mathbb{R}^n
+\]
+denote portfolio weights, let
+\[
+\mu\in\mathbb{R}^n
+\]
+denote expected returns, and let
+\[
+\Sigma\succeq0
+\]
+denote the covariance matrix.
+
+The portfolio expected return is
+\[
+r(x)=\mu^\top x,
+\]
+and portfolio standard deviation is
+\[
+\sigma(x)
+=
+\sqrt{x^\top\Sigma x}.
+\]
+
+We consider
+\begin{equation}
+\begin{aligned}
+\max_x\quad&
+\mu^\top x-\lambda\sqrt{x^\top\Sigma x}\\
+\text{s.t.}\quad&
+Ax\leq b,\\
+&Ex=d,
+\end{aligned}
+\tag{1}
+\end{equation}
+where $\lambda>0$ controls the trade-off between expected return and
+risk.
+
+Equivalently, we minimize
+\[
+-\mu^\top x+\lambda\sqrt{x^\top\Sigma x}.
+\]
+
+\subsection{Second-Order Cone Representation}
+
+Choose a factorization
+\[
+\Sigma=L^\top L.
+\]
+
+Then
+\[
+\sqrt{x^\top\Sigma x}
+=
+\|Lx\|_2.
+\]
+
+Introduce an auxiliary variable $t$. The problem becomes
+\begin{equation}
+\begin{aligned}
+\min_{x,t}\quad&
+-\mu^\top x+\lambda t\\
+\text{s.t.}\quad&
+Ax\leq b,\\
+&Ex=d,\\
+&\|Lx\|_2\leq t.
+\end{aligned}
+\tag{2}
+\end{equation}
+
+Define the second-order cone
+\[
+\mathcal Q^{m+1}
+=
+\{(t,y)\in\mathbb{R}^{m+1}:\|y\|_2\leq t\}.
+\]
+
+The final constraint can therefore be written as
+\[
+(t,Lx)\in\mathcal Q^{m+1}.
+\]
+
+Thus the complete problem is an SOCP with a polyhedral component
+and a second-order cone component.
+
+\subsection{Why Standard Deviation}
+
+Variance gives the quadratic objective
+\[
+\mu^\top x-\gamma x^\top\Sigma x,
+\]
+which is particularly convenient computationally.
+
+However, variance has units of return squared, while expected return
+has units of return. Standard deviation has the same units as
+expected return:
+\[
+[\sigma]=[\mu].
+\]
+
+Therefore
+\[
+\mu^\top x-\lambda\sigma(x)
+\]
+is directly interpretable as a return-minus-risk objective.
+
+The project deliberately accepts the additional conic structure in
+order to preserve this interpretation.
+
+% ============================================================
+\section{COSA Concept}
+% ============================================================
+
+\subsection{Classical Active-Set Philosophy}
+
+For a polyhedral problem
+\[
+\min_x f(x)
+\quad\text{s.t.}\quad
+Ax\leq b,\quad Ex=d,
+\]
+the active set at $x_k$ is
+\[
+\mathcal A_k
+=
+\{i:a_i^\top x_k=b_i\}.
+\]
+
+The working set imposes
+\[
+a_i^\top p=0,
+\qquad i\in\mathcal A_k,
+\]
+and
+\[
+Ep=0.
+\]
+
+A direction is then computed within the tangent space of the
+currently active constraints.
+
+\subsection{Extension to a Cone}
+
+For COSA, the working set contains:
+
+\begin{enumerate}
+    \item active linear inequalities;
+    \item equality constraints;
+    \item the currently active geometry of the second-order cone.
+\end{enumerate}
+
+Let
+\[
+z=(t,Lx).
+\]
+
+The SOC constraint is
+\[
+z\in\mathcal Q.
+\]
+
+At a nonzero boundary point,
+\[
+t=\|Lx\|_2,
+\]
+define
+\[
+u=\frac{Lx}{\|Lx\|_2}.
+\]
+
+The tangent condition is
+\begin{equation}
+\tau-u^\top Lp=0.
+\tag{3}
+\end{equation}
+
+This equation is the local analogue of an active linear constraint.
+
+\subsection{Important Geometric Qualification}
+
+A second-order cone is not simply a nonlinear scalar inequality.
+Its geometry is naturally described through tangent cones, normal
+cones, and faces.
+
+Therefore COSA will initially use the tangent representation to
+construct directions, but the final algorithm will be formulated in
+terms of the primal-dual conic KKT conditions.
+
+This distinction is important. The project should not merely become
+an SQP method with an SOC constraint. The objective is a genuine
+conic active-set method.
+
+% ============================================================
+\section{Algorithmic Architecture}
+% ============================================================
+
+\subsection{Iteration Structure}
+
+The fundamental COSA iteration is
+
+\[
+\boxed{
+\text{working set}
+\rightarrow
+\text{direction}
+\rightarrow
+\text{feasible step}
+\rightarrow
+\text{multiplier test}
+\rightarrow
+\text{working-set update}.
+}
+\]
+
+At iteration $k$:
+
+\begin{enumerate}
+    \item Evaluate primal feasibility.
+    \item Identify active linear constraints.
+    \item Determine the SOC status.
+    \item Construct the current working-set equations.
+    \item Solve the direction problem.
+    \item Determine the maximum feasible step.
+    \item Update the primal variables.
+    \item Compute multipliers.
+    \item Add or remove constraints.
+    \item Check the conic KKT conditions.
+\end{enumerate}
+
+\subsection{Direction Problem}
+
+Let
+\[
+f(x,t)=-\mu^\top x+\lambda t.
+\]
+
+For a candidate direction $(p,\tau)$, a regularized direction problem
+can be written as
+\begin{equation}
+\begin{aligned}
+\min_{p,\tau}\quad&
+\nabla f^\top
+\begin{bmatrix}
+p\\
+\tau
+\end{bmatrix}
++
+\frac12
+\begin{bmatrix}
+p\\
+\tau
+\end{bmatrix}^{\!\top}
+H
+\begin{bmatrix}
+p\\
+\tau
+\end{bmatrix}\\
+\text{s.t.}\quad&
+a_i^\top p=0,
+\qquad i\in\mathcal A_k,\\
+&Ep=0,\\
+&\tau-u_k^\top Lp=0
+\qquad\text{if the SOC is active.}
+\end{aligned}
+\tag{4}
+\end{equation}
+
+The initial implementation may use
+\[
+H=\rho I,
+\qquad \rho>0,
+\]
+to obtain a well-defined direction.
+
+\subsection{KKT System}
+
+The direction problem leads to a linear KKT system of the form
+\[
+\begin{bmatrix}
+H&W_k^\top\\
+W_k&0
+\end{bmatrix}
+\begin{bmatrix}
+d_k\\
+\nu_k
+\end{bmatrix}
+=
+-
+\begin{bmatrix}
+g_k\\
+0
+\end{bmatrix},
+\]
+where
+\[
+d_k=
+\begin{bmatrix}
+p_k\\
+\tau_k
+\end{bmatrix}
+\]
+and $W_k$ contains the current working-set equations.
+
+This creates a direct connection with classical active-set QP
+implementations.
+
+% ============================================================
+\section{Exact SOC Step Calculation}
+% ============================================================
+
+\subsection{Cone Feasibility Along a Direction}
+
+Given a feasible point $(x,t)$ and a direction $(p,\tau)$, we require
+\[
+\|L(x+\alpha p)\|_2
+\leq
+t+\alpha\tau.
+\tag{5}
+\]
+
+Define
+\[
+r=Lx,
+\qquad
+q=Lp.
+\]
+
+Then
+\[
+\|r+\alpha q\|_2
+\leq
+t+\alpha\tau.
+\]
+
+Provided the right-hand side is nonnegative, squaring gives
+\begin{equation}
+\|q\|_2^2\alpha^2
++
+2(r^\top q-t\tau)\alpha
++
+\|r\|_2^2-t^2
+\leq0.
+\tag{6}
+\end{equation}
+
+Thus the SOC feasibility condition reduces to a scalar quadratic
+inequality.
+
+\subsection{Maximum Feasible Step}
+
+The COSA implementation will compute the admissible interval in
+$\alpha$ from (6), together with the step bounds induced by the
+linear inequalities.
+
+For each inactive linear inequality,
+\[
+a_i^\top(x+\alpha p)\leq b_i
+\]
+gives the standard bound
+\[
+\alpha
+\leq
+\frac{b_i-a_i^\top x}{a_i^\top p}
+\]
+whenever $a_i^\top p>0$.
+
+The feasible step is therefore determined by the intersection of:
+
+\begin{itemize}
+    \item the linear feasible interval;
+    \item the SOC feasible interval;
+    \item any explicit step bounds.
+\end{itemize}
+
+This is the conic analogue of the classical active-set ratio test.
+
+% ============================================================
+\section{Conic KKT Conditions}
+% ============================================================
+
+\subsection{Primal Problem}
+
+The primal SOCP is
+\begin{equation}
+\begin{aligned}
+\min_{x,t}\quad&
+-\mu^\top x+\lambda t\\
+\text{s.t.}\quad&
+Ax\leq b,\\
+&Ex=d,\\
+&(t,Lx)\in\mathcal Q.
+\end{aligned}
+\tag{7}
+\end{equation}
+
+Introduce multipliers $y\geq0$ for the linear inequalities and
+$\nu$ for the equalities. Let $w$ denote the dual variable associated
+with the SOC.
+
+\subsection{Stationarity}
+
+The conic stationarity equations have the form
+\[
+-\mu+A^\top y+E^\top\nu+L^\top w=0,
+\]
+together with the stationarity condition associated with $t$.
+
+The exact sign convention will be fixed in the implementation and
+must be used consistently throughout the derivation and code.
+
+\subsection{Primal and Dual Cone Feasibility}
+
+The primal SOC condition is
+\[
+(t,Lx)\in\mathcal Q.
+\]
+
+The dual SOC variable must satisfy
+\[
+w_{\mathrm{soc}}\in\mathcal Q,
+\]
+under the chosen standard representation.
+
+\subsection{Complementarity}
+
+For the linear constraints,
+\[
+y_i(a_i^\top x-b_i)=0.
+\]
+
+For the SOC, complementarity is expressed through the cone
+complementarity relation between the primal and dual cone variables.
+
+The final implementation will use residuals for:
+
+\begin{itemize}
+    \item primal feasibility;
+    \item dual feasibility;
+    \item stationarity;
+    \item linear complementarity;
+    \item SOC complementarity.
+\end{itemize}
+
+These residuals define the primary termination criterion.
+
+% ============================================================
+\section{Active-Set Logic}
+% ============================================================
+
+\subsection{Linear Constraint Activation}
+
+If an inactive inequality reaches its boundary,
+\[
+a_i^\top x=b_i,
+\]
+the constraint is added to the working set.
+
+The corresponding multiplier is subsequently computed from the
+KKT system.
+
+\subsection{Linear Constraint Deactivation}
+
+If an active inequality has a multiplier violating the required sign,
+the constraint is a candidate for removal.
+
+The implementation will initially follow the classical rule of
+removing the most strongly violating multiplier, subject to
+numerical tolerances.
+
+\subsection{SOC Activation}
+
+The SOC becomes geometrically active when
+\[
+t-\|Lx\|_2
+\]
+is sufficiently small.
+
+A tolerance such as
+\[
+t-\|Lx\|_2\leq\varepsilon_{\mathrm{act}}
+\]
+will be used.
+
+However, geometric activity alone is not sufficient to establish
+optimality. The conic multiplier must also be considered.
+
+\subsection{SOC Deactivation}
+
+A key research component is determining when the SOC should be
+removed from the working geometry.
+
+Unlike a scalar inequality, the SOC has richer boundary structure.
+The final implementation will use the conic KKT multiplier and normal
+cone conditions to determine whether the cone contributes a genuine
+active normal at the candidate solution.
+
+% ============================================================
+\section{Degeneracy and Special Cases}
+% ============================================================
+
+\subsection{The Point $Lx=0$}
+
+At
+\[
+Lx=0,
+\]
+the expression
+\[
+\frac{Lx}{\|Lx\|_2}
+\]
+is undefined.
+
+This case must therefore be treated separately.
+
+The SOC boundary at the apex
+\[
+(t,Lx)=(0,0)
+\]
+has a different tangent and normal geometry from a smooth nonzero
+boundary point.
+
+The implementation will initially handle this case using the exact
+SOC membership and normal-cone conditions rather than a tangent
+hyperplane.
+
+\subsection{Nearly Active Cones}
+
+Numerical tolerances can lead to oscillation between active and
+inactive states.
+
+COSA will therefore use separate activation and deactivation
+tolerances, analogous to hysteresis:
+\[
+\varepsilon_{\mathrm{on}}
+<
+\varepsilon_{\mathrm{off}}.
+\]
+
+\subsection{Degenerate Working Sets}
+
+The working-set KKT matrix may become singular when active constraints
+are linearly dependent.
+
+The implementation will detect rank deficiency and investigate:
+
+\begin{itemize}
+    \item QR-based rank detection;
+    \item null-space methods;
+    \item regularization;
+    \item dependent-constraint removal.
+\end{itemize}
+
+% ============================================================
+\section{Development Phases}
+% ============================================================
+
+\subsection{Phase I: Polyhedral Baseline}
+
+Implement a conventional active-set solver for
+\[
+\min_x\;
+c^\top x+\frac12x^\top Hx
+\]
+subject to
+\[
+Ax\leq b,
+\qquad
+Ex=d.
+\]
+
+Required components:
+
+\begin{itemize}
+    \item feasible initialization;
+    \item active-set representation;
+    \item direction computation;
+    \item KKT solve;
+    \item multiplier calculation;
+    \item constraint addition;
+    \item constraint deletion;
+    \item ratio test;
+    \item termination checks.
+\end{itemize}
+
+This implementation will be deliberately simple and will provide the
+baseline for debugging COSA.
+
+\subsection{Phase II: SOC Geometry Library}
+
+Implement independent routines for:
+
+\begin{itemize}
+    \item SOC membership;
+    \item SOC boundary detection;
+    \item SOC tangent calculation;
+    \item SOC normal calculation;
+    \item SOC step feasibility;
+    \item exact SOC step interval;
+    \item apex handling.
+\end{itemize}
+
+These routines should be tested independently using synthetic
+directions and analytically known cone intersections.
+
+\subsection{Phase III: COSA Prototype}
+
+Combine the polyhedral active-set method with the SOC geometry.
+
+The prototype should solve the portfolio problem using:
+
+\begin{enumerate}
+    \item a working set of linear constraints;
+    \item a tangent representation of the SOC;
+    \item exact SOC step lengths;
+    \item multiplier-based active-set updates.
+\end{enumerate}
+
+At this stage, correctness is more important than speed.
+
+\subsection{Phase IV: Full Conic KKT Method}
+
+Replace the preliminary tangent-only treatment with a full
+primal-dual conic formulation.
+
+The goal is to obtain a method whose stopping criterion and
+working-set logic are derived directly from the SOCP KKT conditions.
+
+\subsection{Phase V: Numerical Linear Algebra}
+
+Optimize the solution of the repeated KKT systems.
+
+Investigate:
+
+\begin{itemize}
+    \item sparse LDL$^\top$ factorization;
+    \item QR factorization;
+    \item null-space methods;
+    \item range-space methods;
+    \item factorization reuse;
+    \item rank-one updates;
+    \item scaling;
+    \item regularization.
+\end{itemize}
+
+\subsection{Phase VI: Warm Starts}
+
+Implement warm starts as a first-class feature.
+
+Given a solution $(x_k,t_k)$ for one problem, initialize the next
+problem using:
+
+\begin{itemize}
+    \item the previous primal solution;
+    \item the previous working set;
+    \item previous multipliers where appropriate;
+    \item previous KKT factorizations when possible.
+\end{itemize}
+
+This is expected to be one of the strongest potential advantages of
+COSA.
+
+% ============================================================
+\section{Portfolio Test Problems}
+% ============================================================
+
+\subsection{Basic Portfolio}
+
+The first model will be
+\begin{equation}
+\begin{aligned}
+\min_{x,t}\quad&
+-\mu^\top x+\lambda t\\
+\text{s.t.}\quad&
+\mathbf{1}^\top x=1,\\
+&x\geq0,\\
+&\|Lx\|_2\leq t.
+\end{aligned}
+\tag{8}
+\end{equation}
+
+This provides the simplest realistic test.
+
+\subsection{Box Constraints}
+
+Introduce
+\[
+\ell\leq x\leq u.
+\]
+
+These constraints are particularly useful for active-set testing
+because many portfolio bounds are expected to become active.
+
+\subsection{Sector Constraints}
+
+Add constraints of the form
+\[
+A_{\mathrm{sector}}x\leq b_{\mathrm{sector}}.
+\]
+
+These create nontrivial combinations of active constraints.
+
+\subsection{Factor Exposure Constraints}
+
+Add
+\[
+\ell_f\leq Fx\leq u_f.
+\]
+
+This provides a useful test of correlated active constraints.
+
+\subsection{Turnover Constraints}
+
+For a previous portfolio $x^{\mathrm{old}}$, turnover can be
+represented using auxiliary variables and linear inequalities.
+
+These problems are particularly interesting for warm starts because
+successive portfolio rebalancing problems are naturally related.
+
+% ============================================================
+\section{Efficient Frontier Experiments}
+% ============================================================
+
+One of the principal numerical experiments will solve the sequence
+
+\[
+\min_x
+\left\{
+-\mu^\top x+\lambda\sigma(x)
+\right\}
+\]
+
+for
+\[
+\lambda_1,\lambda_2,\ldots,\lambda_N.
+\]
+
+The sequence generates points on the risk-return frontier.
+
+For consecutive values
+\[
+\lambda_k,\lambda_{k+1},
+\]
+the optimal portfolios and active constraints are expected to be
+related.
+
+This allows us to test whether COSA benefits from:
+
+\[
+\text{solution}_{k}
+\longrightarrow
+\text{warm start for solution}_{k+1}.
+\]
+
+The main quantities measured will be:
+
+\begin{itemize}
+    \item number of active-set iterations;
+    \item number of constraints added;
+    \item number of constraints removed;
+    \item number of KKT factorizations;
+    \item total runtime;
+    \item KKT residual;
+    \item number of iterations saved by warm starts.
+\end{itemize}
+
+% ============================================================
+\section{Benchmarking}
+% ============================================================
+
+\subsection{Reference Solvers}
+
+COSA will be compared with established commercial conic optimization
+solvers, initially including MOSEK and Gurobi.
+
+These solvers provide reference solutions for correctness and
+performance.
+
+The comparison should distinguish between:
+
+\begin{itemize}
+    \item cold-start solves;
+    \item warm-start solves;
+    \item individual large problems;
+    \item sequences of related problems.
+\end{itemize}
+
+\subsection{Accuracy Metrics}
+
+For each solution, record:
+
+\begin{itemize}
+    \item primal residual;
+    \item dual residual;
+    \item stationarity residual;
+    \item complementarity residual;
+    \item objective value;
+    \item standard deviation;
+    \item expected return.
+\end{itemize}
+
+\subsection{Performance Metrics}
+
+Record:
+
+\begin{itemize}
+    \item wall-clock time;
+    \item number of iterations;
+    \item number of KKT solves;
+    \item number of active-set changes;
+    \item factorization time;
+    \item memory usage where relevant.
+\end{itemize}
+
+\subsection{Robustness Tests}
+
+Construct instances with:
+
+\begin{itemize}
+    \item nearly redundant constraints;
+    \item highly correlated assets;
+    \item ill-conditioned covariance matrices;
+    \item nearly active SOC constraints;
+    \item degenerate optimal solutions;
+    \item many simultaneously active portfolio bounds.
+\end{itemize}
+
+The purpose is to identify failure modes before optimizing performance.
+
+% ============================================================
+\section{Numerical Linear Algebra Strategy}
+% ============================================================
+
+The active-set approach repeatedly solves systems of the form
+\[
+\begin{bmatrix}
+H&W^\top\\
+W&0
+\end{bmatrix}
+\begin{bmatrix}
+d\\
+\nu
+\end{bmatrix}
+=
+\begin{bmatrix}
+r\\
+0
+\end{bmatrix}.
+\]
+
+Since the working set changes by only a few constraints per iteration,
+it may be possible to exploit substantial structure.
+
+\subsection{Initial Implementation}
+
+The first implementation will refactor the KKT matrix at every
+iteration.
+
+This minimizes implementation complexity and provides a reliable
+reference.
+
+\subsection{Factorization Reuse}
+
+Once the algorithm is correct, investigate updates when:
+
+\begin{itemize}
+    \item one constraint is added;
+    \item one constraint is removed;
+    \item the SOC tangent changes.
+\end{itemize}
+
+The SOC tangent changes continuously with $x$, so this part is more
+subtle than ordinary linear constraint updates.
+
+\subsection{Scaling}
+
+Scaling will be investigated for:
+
+\begin{itemize}
+    \item portfolio variables;
+    \item covariance matrices;
+    \item linear constraints;
+    \item expected returns;
+    \item SOC variables.
+\end{itemize}
+
+Good scaling is particularly important because the SOC couples $t$
+and $Lx$.
+
+% ============================================================
+\section{Convergence and Correctness}
+% ============================================================
+
+The project will distinguish three levels of validation.
+
+\subsection{Level 1: Feasibility}
+
+Every accepted iterate must satisfy, within tolerance,
+\[
+Ax\leq b,
+\qquad
+Ex=d,
+\qquad
+\|Lx\|_2\leq t.
+\]
+
+\subsection{Level 2: Stationarity}
+
+The computed multipliers must satisfy the stationarity equations to
+within a prescribed tolerance.
+
+\subsection{Level 3: Conic KKT Optimality}
+
+The final solution must satisfy the full conic KKT conditions.
+
+Because the problem is convex, satisfaction of the KKT conditions
+provides a certificate of global optimality under the usual
+constraint qualification assumptions.
+
+The final paper should state the precise assumptions required by the
+algorithm and distinguish the generic case from degenerate cases.
+
+% ============================================================
+\section{Software Architecture}
+% ============================================================
+
+The implementation will be modular.
+
+A proposed structure is:
+
+\begin{verbatim}
+cosa/
+    problem/
+        socp.py
+        portfolio.py
+    geometry/
+        soc.py
+        tangent.py
+        step.py
+    active_set/
+        working_set.py
+        multipliers.py
+        updates.py
+    linear_algebra/
+        kkt.py
+        factorization.py
+        scaling.py
+    solver/
+        cosa.py
+        initialization.py
+        termination.py
+    experiments/
+        portfolio.py
+        frontier.py
+        benchmarks.py
+    tests/
+        test_soc.py
+        test_step.py
+        test_kkt.py
+        test_active_set.py
+        test_portfolio.py
+\end{verbatim}
+
+The exact language and numerical libraries can be selected at the
+start of implementation. Python with NumPy/SciPy is suitable for the
+initial prototype; a lower-level implementation can be considered
+after the algorithm is stable.
+
+% ============================================================
+\section{Testing Strategy}
+% ============================================================
+
+\subsection{Unit Tests}
+
+Every geometric primitive should have independent tests.
+
+Examples include:
+
+\begin{itemize}
+    \item points inside the SOC;
+    \item points outside the SOC;
+    \item boundary points;
+    \item tangent directions;
+    \item directions entering the cone;
+    \item directions leaving the cone;
+    \item exact step roots.
+\end{itemize}
+
+\subsection{Analytical Problems}
+
+Construct small SOCPs whose solutions can be derived analytically.
+
+These problems will be used to validate:
+
+\begin{itemize}
+    \item primal solutions;
+    \item active sets;
+    \item multipliers;
+    \item SOC activity;
+    \item KKT residuals.
+\end{itemize}
+
+\subsection{Cross-Solver Tests}
+
+For every randomly generated test problem, compare COSA against a
+reference solver.
+
+The objective values should agree to within the prescribed numerical
+tolerance.
+
+% ============================================================
+\section{Research Risks}
+% ============================================================
+
+\subsection{Risk 1: The SOC Working-Set Concept May Be Insufficient}
+
+The boundary of a second-order cone has richer geometry than a
+polyhedral inequality.
+
+If a simple ``SOC active/inactive'' binary state is insufficient, the
+algorithm will be generalized to use cone faces and normal-cone
+information.
+
+\subsection{Risk 2: Cycling}
+
+As in classical active-set methods, the algorithm may cycle among
+working sets.
+
+Potential remedies include:
+
+\begin{itemize}
+    \item anti-cycling rules;
+    \item multiplier tolerances;
+    \item lexicographic selection;
+    \item merit-function safeguards.
+\end{itemize}
+
+\subsection{Risk 3: Numerical Instability}
+
+Nearly dependent constraints and ill-conditioned covariance matrices
+may produce unstable KKT systems.
+
+This will be addressed through scaling, rank detection,
+regularization, and robust factorizations.
+
+\subsection{Risk 4: Poor Generic Performance}
+
+COSA may not outperform interior-point SOCP solvers on large,
+isolated, generic problems.
+
+This is not considered a failure of the project. The principal
+hypothesis is that active-set methods may be particularly attractive
+for structured sequences of related problems and problems with a
+stable active structure.
+
+% ============================================================
+\section{Expected Contributions}
+% ============================================================
+
+The project aims to produce four contributions.
+
+\subsection{1. Mathematical Contribution}
+
+A precise formulation of an active-set method for second-order cone
+constraints, including the appropriate tangent, normal, and
+primal-dual KKT geometry.
+
+\subsection{2. Algorithmic Contribution}
+
+A practical algorithm that combines:
+
+\[
+\text{polyhedral working sets}
++
+\text{SOC geometry}
++
+\text{exact cone-aware step lengths}.
+\]
+
+\subsection{3. Software Contribution}
+
+An open and transparent implementation of COSA suitable for research,
+experimentation, and extension to other SOCPs.
+
+\subsection{4. Computational Contribution}
+
+A systematic study of when conic active-set methods are competitive
+with interior-point methods, with particular emphasis on portfolio
+optimization and warm starts.
+
+% ============================================================
+\section{Milestones}
+% ============================================================
+
+The project will proceed through the following milestones.
+
+\begin{center}
+\begin{tabular}{lll}
+\toprule
+Milestone & Deliverable & Status \\
+\midrule
+M1 & Mathematical problem specification & Planned \\
+M2 & Polyhedral active-set baseline & Planned \\
+M3 & SOC geometry module & Planned \\
+M4 & Exact SOC step calculation & Planned \\
+M5 & First COSA prototype & Planned \\
+M6 & Conic KKT formulation & Planned \\
+M7 & Robust numerical implementation & Planned \\
+M8 & Warm-start capability & Planned \\
+M9 & Portfolio benchmark suite & Planned \\
+M10 & Comparison with reference solvers & Planned \\
+M11 & Final numerical study & Planned \\
+M12 & Research paper and software release & Planned \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+% ============================================================
+\section{Final Deliverables}
+% ============================================================
+
+The project will conclude with the following deliverables.
+
+\begin{enumerate}
+    \item A complete mathematical specification of COSA.
+    \item A working implementation of the algorithm.
+    \item A unit-tested SOC geometry library.
+    \item A robust active-set/KKT linear algebra implementation.
+    \item A portfolio optimization interface.
+    \item A benchmark suite.
+    \item Numerical comparisons against established SOCP solvers.
+    \item Warm-start experiments along the efficient frontier.
+    \item Documentation and reproducible experiments.
+    \item A research paper describing the method and results.
+\end{enumerate}
+
+% ============================================================
+\section{Longer-Term Extensions}
+% ============================================================
+
+Once the basic COSA solver is operational, several extensions become
+possible.
+
+\subsection{Multiple Second-Order Cones}
+
+The method can be generalized to problems containing several
+constraints
+\[
+(t_j,L_jx)\in\mathcal Q_j,
+\qquad
+j=1,\ldots,m.
+\]
+
+The working set would then track the active geometry of multiple
+cones.
+
+\subsection{General SOCPs}
+
+The portfolio structure can be removed entirely, giving a solver for
+the generic form
+\[
+\begin{aligned}
+\min_x\quad&
+c^\top x\\
+\text{s.t.}\quad&
+Ax=b,\\
+&Gx+h\in\mathcal K,
+\end{aligned}
+\]
+where $\mathcal K$ is a Cartesian product of second-order cones.
+
+\subsection{Mixed Conic Problems}
+
+A later version could investigate combinations of:
+
+\begin{itemize}
+    \item linear inequalities;
+    \item second-order cones;
+    \item rotated second-order cones;
+    \item other structured convex cones.
+\end{itemize}
+
+\subsection{Large-Scale and Sparse Problems}
+
+For large portfolios and factor models, covariance matrices often
+have exploitable low-rank structure. COSA could incorporate
+factor-based representations to reduce the cost of the SOC operations.
+
+% ============================================================
+\section{Success Criteria}
+% ============================================================
+
+The project will be considered successful if COSA satisfies the
+following criteria.
+
+\begin{enumerate}
+    \item It reliably solves the initial portfolio SOCPs to high
+    accuracy.
+    
+    \item Its termination criterion is based on mathematically
+    meaningful conic KKT residuals.
+    
+    \item Its working-set decisions can be interpreted in terms of
+    the active portfolio constraints and SOC geometry.
+    
+    \item It demonstrates reliable warm starts on sequences of
+    related portfolio problems.
+    
+    \item Its solutions agree with established SOCP solvers.
+    
+    \item Its numerical behavior is understood on degenerate and
+    ill-conditioned problems.
+    
+    \item The resulting implementation is sufficiently modular to
+    support extensions beyond the initial portfolio application.
+\end{enumerate}
+
+The most important scientific result need not be that COSA is faster
+than every interior-point solver. A valuable result would instead be
+a clear characterization of when conic active-set methods work well,
+why they work well, and how their geometry differs fundamentally from
+polyhedral active-set methods.
+
+% ============================================================
+\section{Summary}
+% ============================================================
+
+COSA begins with a simple but important modeling observation:
+standard deviation is often a more natural risk quantity than
+variance because it has the same units as expected return.
+
+The resulting portfolio problem is naturally represented as an SOCP:
+\[
+\begin{aligned}
+\min_{x,t}\quad&
+-\mu^\top x+\lambda t\\
+\text{s.t.}\quad&
+Ax\leq b,\\
+&Ex=d,\\
+&(t,Lx)\in\mathcal Q.
+\end{aligned}
+\]
+
+The linear constraints retain the familiar structure of an
+active-set method, while the risk term introduces a second-order
+cone.
+
+COSA will investigate whether these two structures can be combined
+into a single algorithmic framework.
+
+The project therefore has both a practical and a broader algorithmic
+objective:
+
+\[
+\boxed{
+\begin{array}{c}
+\text{Portfolio optimization with standard deviation}\\[3pt]
+\Downarrow\\[3pt]
+\text{Second-order cone formulation}\\[3pt]
+\Downarrow\\[3pt]
+\text{Conic active-set method}\\[3pt]
+\Downarrow\\[3pt]
+\text{General active-set methodology for SOCPs}
+\end{array}}
+\]
+
+The portfolio problem is the test bed. The deeper goal is COSA itself:
+a transparent, warm-startable, structure-exploiting active-set
+approach to conic optimization.
+
+\end{document}

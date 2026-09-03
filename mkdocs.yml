@@ -22,4 +22,5 @@ nav:
   - Paper: paper/paper.pdf
   - Development:
       - Architecture: development/architecture.md
+      - Sign convention: development/sign-convention.md
       - Rhiza: development/rhiza.md

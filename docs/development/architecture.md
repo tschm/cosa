@@ -19,9 +19,10 @@ section:
 | `solver` | The iteration itself | `cosa`, `initialization`, `termination` |
 | `experiments` | Numerical studies | `portfolio`, `frontier`, `benchmarks` |
 
-Every package exists now and is empty apart from a docstring naming the modules it will
-own. That is deliberate: it means each later issue has an unambiguous home, and the
-module names above are authoritative even though the files do not exist yet.
+Every package exists, each with a docstring naming the modules it will own. That is
+deliberate: it means each later issue has an unambiguous home, and the module names
+above are authoritative even before the files exist. `problem/socp.py` is the first of
+them to land; the rest are still names.
 
 ## One deviation from the plan: where tests live
 
@@ -78,7 +79,7 @@ is stable. Nothing here forecloses it.
 
 ## Public surface
 
-`cosa/__init__.py` exports exactly two names today:
+`cosa/__init__.py` exports the array aliases every module shares:
 
 ```python
 from cosa import Matrix, Vector
@@ -90,3 +91,13 @@ purpose -- the distinction they carry is for the reader, not for the type checke
 
 The surface is narrow by choice. Each module named in the table above extends `__all__`
 as it lands, rather than reserving names in advance for code that does not exist.
+`problem/socp.py` is the first to do so: it adds `SOCP`, `MeanStdForm`,
+`SecondOrderCone`, `ConeProduct`, `ProblemError`, `SignConvention` and
+`SIGN_CONVENTION`.
+
+## The other decision recorded once
+
+The sign convention for the conic KKT conditions lives on
+[its own page](sign-convention.md), for the same reason this one exists: the plan defers
+it to the implementation, and four later issues consume it. Read it before touching
+multipliers, residuals or the working set.

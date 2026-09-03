@@ -166,7 +166,7 @@ requires-dist = [
     { name = "gurobipy", marker = "extra == 'gurobi'", specifier = ">=11" },
     { name = "mosek", marker = "extra == 'mosek'", specifier = ">=10" },
     { name = "numpy", specifier = ">=1.26" },
-    { name = "scipy", specifier = ">=1.11" },
+    { name = "scipy", specifier = ">=1.11.2" },
 ]
 provides-extras = ["reference", "mosek", "gurobi"]
 

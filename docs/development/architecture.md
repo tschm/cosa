@@ -113,6 +113,13 @@ undeclared until something imports it for two reasons:
   libraries can be selected at the start of implementation"* -- and asks only that the
   option be recorded. This is that record.
 
+The floor is `scipy>=1.11.2` rather than `>=1.11`, and the reason is the
+lowest-direct-resolution gate: 1.11.1 predates Python 3.12 and has no wheel for it, so
+`uv sync --resolution lowest-direct` tried to build it from source and the Cython step
+failed in CI. 1.11.2 is the first release with `cp312` wheels, which mirrors why the NumPy
+floor is 1.26. A dependency floor is a claim that the project works there, and that gate is
+what checks the claim.
+
 **That prediction came true at #25, exactly as written.** §8.3 asks for "QR-based rank
 detection", pivoted QR is the one factorization NumPy does not have, and
 `linear_algebra/rank.py` is the change that both imports SciPy and declares it. The

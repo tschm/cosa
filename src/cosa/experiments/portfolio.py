@@ -646,6 +646,15 @@ def large(
     The box inherits :func:`box`'s default cap, which scales with the asset count, so the
     active set grows with the problem -- a large active set, not just a large problem.
 
+    **Its optimum is at the apex, which was not designed and is worth knowing.** A rank-``k``
+    covariance over ``n >> k`` assets leaves ``L`` with an ``(n - k)``-dimensional null
+    space, and the box admits points in it -- so the minimum-risk portfolio has risk exactly
+    zero and, ``lam`` being positive, the optimum takes it. That makes this family an apex
+    instance, exercising #24's branch without anyone constructing one, and it has a numerical
+    consequence: §8.1's exact treatment pins the whole conic block, which with most bounds
+    already active leaves the working-set matrix square and the KKT system conditioned around
+    ``1e18``. Found by #26's factorization comparison disagreeing on it.
+
     Args:
         assets: the number of assets.
         factors: the rank of the factor covariance.

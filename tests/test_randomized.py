@@ -28,9 +28,12 @@ from cosa.active_set import updates
 from cosa.experiments import randomized, reference
 from cosa.geometry import soc
 
-# Fixed seeds: a spread of shapes, plus the two that produced the largest reference-solver
-# disagreement over the first two hundred. They are named here so a failure names them too.
-SAMPLE = (0, 1, 2, 5, 7, 13, 42, 52, 76, 100)
+# Fixed seeds: a spread of shapes, plus the ones with a history. 76 produced the largest
+# Clarabel-versus-SCS gap over the first two hundred; 605467 was found by the property test
+# below and is the counterexample that removed SCS from the peer set -- a well-conditioned
+# three-asset instance where it disagrees with Clarabel by 0.9%. They are named here so a
+# failure names them too.
+SAMPLE = (0, 1, 2, 5, 7, 13, 42, 52, 76, 100, 605467)
 
 
 def feasible(problem, z, tolerance=1e-9):
@@ -216,16 +219,47 @@ def test_every_sampled_instance_is_cross_checked(seed):
 def test_the_worst_sampled_disagreement_is_still_inside_the_tolerance():
     """Seed 76 is the largest Clarabel-versus-SCS gap in the first two hundred draws.
 
-    Kept as a regression net around :data:`cosa.experiments.reference.BACKEND_ACCURACY`:
-    the gap here is about 1e-5, which is why SCS is held to 1e-4 rather than to §16.3's
-    1e-6. Tighten that figure and this test says so.
+    Kept as a regression net around :data:`cosa.experiments.reference.BACKEND_ACCURACY`,
+    and asked of SCS explicitly: the default cross-check no longer includes it.
     """
-    check = reference.cross_check(randomized.random_instance(76).problem, name="s76")
-    if len(check.solutions) < 2:
+    instance = randomized.random_instance(76)
+    solvers = reference.available_solvers()
+    if len(solvers) < 2:
         pytest.skip("only one reference solver is installed, so there is nothing to disagree")
+    check = reference.cross_check(instance.problem, name="s76", solvers=solvers)
     assert check.gap > reference.OBJECTIVE_TOLERANCE, "this instance is why the tolerance widens"
     assert check.agrees, str(check)
     assert check.tolerance > check.requested_tolerance
+
+
+def test_scs_is_not_a_peer_and_seed_605467_is_why():
+    """The counterexample that removed SCS from the default cross-check pool.
+
+    `BACKEND_ACCURACY` originally held SCS to `1e-4`, measured over 200 randomized
+    instances whose worst gap was `9.8e-6`. The property test below then drew seed 605467
+    -- three assets, rank two, condition number one, nothing exotic -- where SCS and
+    Clarabel differ by **0.9%**, a hundred times past that bound.
+
+    Widening the tolerance to cover it would have made the cross-check vacuous. Removing SCS
+    from the peer set is the repair, and it is what the module's own description of SCS as
+    "a fallback rather than a peer" already implied. This test pins both halves: the default
+    pool agrees, and the pool including SCS does not.
+    """
+    instance = randomized.random_instance(605467)
+    assert reference.cross_check(instance.problem, name="peers").agrees
+
+    if not reference.CvxpySolver("SCS").is_available():
+        pytest.skip("SCS is not installed")
+    with_scs = reference.cross_check(instance.problem, name="with-scs", solvers=reference.available_solvers())
+    assert not with_scs.agrees
+    assert with_scs.gap > 1e-3, str(with_scs)
+
+
+def test_the_peer_set_excludes_first_order_solvers():
+    """Stated as a property of the list, so a first-order solver cannot rejoin by accident."""
+    assert "SCS" not in reference.PEER_BACKENDS
+    for backend in reference.PEER_BACKENDS:
+        assert reference.BACKEND_ACCURACY[backend] <= reference.OBJECTIVE_TOLERANCE
 
 
 # ----------------------------------------------------------------------------------
@@ -234,10 +268,10 @@ def test_the_worst_sampled_disagreement_is_still_inside_the_tolerance():
 
 
 def test_the_cross_check_compares_the_references_with_each_other_when_given_no_objective():
-    """The strongest available claim before #20 exists: reference against reference."""
+    """The strongest available claim before #20 exists: peer against peer."""
     check = reference.cross_check(randomized.random_instance(1).problem, name="pairwise")
     assert check.objective is None
-    assert len(check.solutions) == len(reference.available_solvers())
+    assert len(check.solutions) == len(reference.available_solvers(reference.PEER_BACKENDS))
     assert check.agrees, str(check)
 
 

@@ -32,16 +32,20 @@ def test_subpackage_imports(name):
 PUBLIC_SURFACE = [
     "SIGN_CONVENTION",
     "SOCP",
+    "ApexError",
     "ConePosition",
     "ConeProduct",
     "ConeStatus",
     "ConstraintNames",
+    "Direction",
     "Matrix",
     "MeanStdForm",
     "MeanStdPortfolio",
     "ProblemError",
+    "RowLayout",
     "SecondOrderCone",
     "SignConvention",
+    "SingularKktError",
     "Vector",
     "WorkingSet",
 ]
@@ -56,6 +60,19 @@ NOT_AT_THE_ROOT = [
     "positions",
     "removal_candidate",
     "slack",
+    "tangent_row",
+    "working_set_matrix",
+]
+
+# The other half of the rule: `cosa.experiments` is the harness that exercises the
+# library, not part of what the library offers, so none of it reaches the root either.
+NOT_THE_LIBRARY = [
+    "CrossCheck",
+    "CvxpySolver",
+    "PortfolioInstance",
+    "RandomSpec",
+    "cross_check",
+    "random_instance",
     "solve_reference",
 ]
 
@@ -75,6 +92,14 @@ def test_the_root_exports_types_and_not_routines():
 
     for name in NOT_AT_THE_ROOT:
         assert not hasattr(cosa, name), f"{name} belongs to its module, not to the root"
+
+
+def test_the_root_exports_the_library_and_not_the_harness():
+    """`cosa.experiments` exercises the library; it is not part of its surface."""
+    import cosa
+
+    for name in NOT_THE_LIBRARY:
+        assert not hasattr(cosa, name), f"{name} is harness, not library"
 
 
 def test_array_aliases_are_usable():

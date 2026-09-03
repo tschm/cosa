@@ -13,7 +13,12 @@ repo_url: https://github.com/tschm/cosa
 repo_name: tschm/cosa
 
 # nav is replaced wholesale by this file -- the base does not merge into it.
+# `paper/paper.pdf` is an asset, not a page: tectonic writes the PDF beside its
+# source and `docs/paper` is already inside `docs_dir`, so the site build picks it
+# up with no copy step. It resolves only after `rhiza-task paper` has run, which is
+# why `book-nav` is a separate gate from `book`.
 nav:
   - Home: index.md
+  - Paper: paper/paper.pdf
   - Development:
       - Rhiza: development/rhiza.md

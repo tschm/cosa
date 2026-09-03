@@ -81,11 +81,18 @@ system where the others solve an ``(n + m)``-by-``(n + m)`` one, and an active-s
 working set is small compared with its variable count for most of a solve. It agrees with
 the reference to machine precision.
 
-It is *not* chosen for robustness, and the way it fails is worth knowing. On a
-rank-deficient working set ``W @ W.T`` is singular too -- but LAPACK does not say so, for
-the same reason #12's original singularity check did not: a dependent system produces a
-tiny pivot rather than a zero one, so the solve *returns*, and it returns a direction that
-does not satisfy ``W @ d = 0`` at all. A plausible-looking wrong answer, not an exception.
+It is *not* chosen for robustness, and the way it fails is worth knowing -- including that
+*how* it fails depends on the machine. On a rank-deficient working set ``W @ W.T`` is
+singular too, and what LAPACK does about that is not portable:
+
+* on OpenBLAS (Linux CI) the solve raises ``LinAlgError``;
+* on Apple's Accelerate it *returns*, with a direction that does not satisfy ``W @ d = 0``
+  at all -- a plausible-looking wrong answer, the same trap #12's original singularity
+  check fell into.
+
+Both were observed on this project, the second locally and the first in CI, which is worth
+recording twice over: the route is unusable on a degenerate set either way, and *no*
+correctness property should be written in terms of which failure a given LAPACK produces.
 
 So the loop does not reach this route on a degenerate set: #25's rank test refuses first,
 and the null-space route is the one that still answers there. Fast for the common case, with

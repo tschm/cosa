@@ -208,17 +208,8 @@ def test_the_large_family_reaches_the_apex_and_that_wrecks_the_conditioning():
     assert np.linalg.cond(system.matrix) > 1e3
 
 
-def test_the_default_returns_a_wrong_answer_on_a_degenerate_set_rather_than_failing():
-    """Why the default is not chosen for robustness, and how it fails when it does.
-
-    On a rank-deficient working set `W @ W.T` is singular -- but LAPACK does not say so, for
-    the same reason #12's original singularity check did not: a dependent system gives a tiny
-    pivot rather than a zero one, so the solve returns, and returns a direction that does not
-    satisfy `W @ d = 0` at all. A plausible-looking wrong answer, not an exception.
-
-    Which is exactly why #25's rank test refuses before the loop ever reaches this route, and
-    why the null-space method is the fallback: it still answers here, correctly.
-    """
+def degenerate_system():
+    """A KKT system whose working set is rank-deficient, from #33's family."""
     instance = families.degenerate_optimum(6, seed=0)
     problem = instance.problem
     z = reference.solve_reference(problem).z
@@ -226,36 +217,49 @@ def test_the_default_returns_a_wrong_answer_on_a_degenerate_set_rather_than_fail
     for index in updates.activation_candidates(problem, z, working_set, tolerance=1e-6):
         working_set = updates.add_inequality(working_set, index)
     working_set = updates.activate_cones(problem, z, working_set)
-    system = kkt.assemble(problem, working_set, z)
+    return kkt.assemble(problem, working_set, z)
+
+
+def test_the_default_is_unusable_on_a_degenerate_set_however_lapack_fails():
+    """Why the default is not chosen for robustness -- and why *how* it fails is not asserted.
+
+    On a rank-deficient working set `W @ W.T` is singular too, and LAPACK's response is not
+    portable: OpenBLAS raises `LinAlgError`, Apple's Accelerate returns a direction that does
+    not satisfy `W @ d = 0`. Both were seen on this project -- the second locally, the first
+    in CI on the very commit that documented the second as *the* behaviour.
+
+    So the property asserted is the one that holds on both: the range-space route does not
+    produce a correct direction here, and the null-space route does. Which is exactly why
+    #25's rank test refuses before the loop reaches this route.
+    """
+    system = degenerate_system()
     assert np.linalg.matrix_rank(system.W) < system.num_rows, "the set really is dependent"
 
-    wrong, _ = fz.STRATEGIES["range-space"](system)
-    assert float(np.abs(system.W @ wrong).max()) > 1e-3, "it returns, and the answer is wrong"
+    try:
+        wrong, _ = fz.STRATEGIES["range-space"](system)
+    except np.linalg.LinAlgError:
+        pass  # one of the two failures
+    else:
+        assert float(np.abs(system.W @ wrong).max()) > 1e-3, "the other: it returns, and is wrong"
 
     survives, _ = fz.STRATEGIES["null-space"](system)
     assert np.all(np.isfinite(survives))
     np.testing.assert_allclose(system.W @ survives, 0.0, atol=1e-9)
 
 
-def test_a_comparison_reports_disagreement_rather_than_hiding_it():
+def test_a_comparison_reports_the_failure_however_it_arrives():
     """A comparison over adversarial systems must survive one strategy going wrong.
 
     Measured against the null-space route, which is the one that is right here, the
-    range-space answer shows up as a large deviation rather than as a crash -- which is what
-    makes `all_agree` a useful thing to assert on the robustness families.
+    range-space answer shows up either as a counted failure or as a large deviation --
+    whichever this machine's LAPACK produces. `all_agree` is false in both cases, which is
+    what makes it a useful thing to assert on the robustness families.
     """
-    instance = families.degenerate_optimum(6, seed=0)
-    problem = instance.problem
-    z = reference.solve_reference(problem).z
-    working_set = WorkingSet.empty(problem)
-    for index in updates.activation_candidates(problem, z, working_set, tolerance=1e-6):
-        working_set = updates.add_inequality(working_set, index)
-    working_set = updates.activate_cones(problem, z, working_set)
-
-    comparison = fz.compare([kkt.assemble(problem, working_set, z)], repeats=1, reference="null-space")
+    comparison = fz.compare([degenerate_system()], repeats=1, reference="null-space")
     assert not comparison.all_agree
-    deviations = {m.strategy: m.deviation for m in comparison.measurements}
-    assert deviations["range-space"] > 1e-3
+    verdict = next(m for m in comparison.measurements if m.strategy == "range-space")
+    assert verdict.failures > 0 or verdict.deviation > 1e-3
+    assert not verdict.matches
     assert "DIFFERS" in str(comparison)
 
 

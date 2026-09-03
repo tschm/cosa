@@ -21,8 +21,20 @@ section:
 
 Every package exists, each with a docstring naming the modules it will own. That is
 deliberate: it means each later issue has an unambiguous home, and the module names
-above are authoritative even before the files exist. `problem/socp.py` is the first of
-them to land; the rest are still names.
+above are authoritative even before the files exist. Landed so far:
+`problem/socp.py`, `problem/portfolio.py`, `geometry/soc.py`,
+`active_set/working_set.py`, `active_set/updates.py` and `experiments/reference.py`.
+The rest are still names.
+
+One module in the list above is **not** in the plan's table:
+`experiments/reference.py`, the reference-solver oracle of
+[#21](https://github.com/tschm/cosa/issues/21). The plan puts solver comparison in
+`benchmarks`, but the oracle and the study are different things with different
+lifetimes -- §16.3 wants *every* generated problem cross-checked from M5 onward, while
+`benchmarks` is the M10 comparison table. Folding the oracle into `benchmarks` would
+have made every test that needs an oracle depend on the study module. The adapter got
+its own module; `benchmarks` still belongs to
+[#34](https://github.com/tschm/cosa/issues/34).
 
 ## One deviation from the plan: where tests live
 
@@ -77,6 +89,19 @@ above prevents it.
 A lower-level implementation, as the plan suggests, is a question for after the algorithm
 is stable. Nothing here forecloses it.
 
+**CVXPY and Clarabel are a test dependency and an optional extra, never a runtime
+dependency.** They are how [#21](https://github.com/tschm/cosa/issues/21)'s oracle
+reaches an open conic solver, and `cosa.experiments.reference` imports CVXPY *inside its
+methods* so that the module -- and therefore the test suite -- imports without it. The
+same `deptry` logic as above applies: nothing under `src/` imports CVXPY at module
+scope, so it belongs in the `test` dependency group (where CI installs it) and in the
+`reference` extra (where a user of the library opts into it), not in
+`[project].dependencies`.
+
+The `mosek` and `gurobi` extras exist for the same reason in reverse: §12.1 names both
+as reference solvers, and both are license-gated, so the suite must run without them and
+skip cleanly. That is what `SolverUnavailableError` is for.
+
 ## Public surface
 
 `cosa/__init__.py` exports the array aliases every module shares:
@@ -91,9 +116,21 @@ purpose -- the distinction they carry is for the reader, not for the type checke
 
 The surface is narrow by choice. Each module named in the table above extends `__all__`
 as it lands, rather than reserving names in advance for code that does not exist.
-`problem/socp.py` is the first to do so: it adds `SOCP`, `MeanStdForm`,
+`problem/socp.py` was the first to do so, adding `SOCP`, `MeanStdForm`,
 `SecondOrderCone`, `ConeProduct`, `ProblemError`, `SignConvention` and
-`SIGN_CONVENTION`.
+`SIGN_CONVENTION`; `problem/portfolio.py` adds `MeanStdPortfolio`, `geometry/soc.py`
+adds `ConePosition`, and `active_set/working_set.py` adds `WorkingSet`, `ConeStatus`
+and `ConstraintNames`.
+
+**What lands at the root is the shared vocabulary -- the types -- and not the
+routines.** A module's functions stay in the module, reached as
+`cosa.geometry.soc.is_boundary`, `cosa.problem.portfolio.covariance_factor` or
+`cosa.active_set.updates.removal_candidate`. The reason is legibility rather than
+tidiness: `cosa.slack` and `cosa.position` say nothing about what they are the slack or
+the position *of*, while `cosa.geometry.soc.slack` says it exactly. The rule is asserted
+in `tests/test_layout.py`, so drifting from it is a deliberate edit rather than a side
+effect. `experiments/reference.py` is not re-exported at all -- it is the test
+scaffolding, not the library.
 
 ## The other decision recorded once
 

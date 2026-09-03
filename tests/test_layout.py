@@ -32,13 +32,31 @@ def test_subpackage_imports(name):
 PUBLIC_SURFACE = [
     "SIGN_CONVENTION",
     "SOCP",
+    "ConePosition",
     "ConeProduct",
+    "ConeStatus",
+    "ConstraintNames",
     "Matrix",
     "MeanStdForm",
+    "MeanStdPortfolio",
     "ProblemError",
     "SecondOrderCone",
     "SignConvention",
     "Vector",
+    "WorkingSet",
+]
+
+# What the root deliberately does *not* re-export: the routines. They are reached as
+# `cosa.geometry.soc.is_boundary` or `cosa.active_set.updates.removal_candidate`, because
+# a name like `slack` or `position` only means something next to its module.
+NOT_AT_THE_ROOT = [
+    "covariance_factor",
+    "is_boundary",
+    "position",
+    "positions",
+    "removal_candidate",
+    "slack",
+    "solve_reference",
 ]
 
 
@@ -49,6 +67,14 @@ def test_public_surface():
     assert cosa.__all__ == PUBLIC_SURFACE
     for name in cosa.__all__:
         assert hasattr(cosa, name), f"cosa.__all__ names {name}, which is missing"
+
+
+def test_the_root_exports_types_and_not_routines():
+    """The rule the surface follows, asserted so that a drift from it is deliberate."""
+    import cosa
+
+    for name in NOT_AT_THE_ROOT:
+        assert not hasattr(cosa, name), f"{name} belongs to its module, not to the root"
 
 
 def test_array_aliases_are_usable():

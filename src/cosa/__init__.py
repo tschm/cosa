@@ -8,7 +8,9 @@ constraints have a natural active-set structure and the risk term
 ``sqrt(x.T @ Sigma @ x)`` enters as a second-order cone.
 
 The full project plan lives in ``docs/paper/paper.tex``; the package layout and the
-decisions behind it are recorded in ``docs/development/architecture.md``.
+decisions behind it are recorded in ``docs/development/architecture.md``, and the one
+fixed sign convention for the conic KKT conditions in
+``docs/development/sign-convention.md``.
 
 Subpackages:
     problem: Problem representation (``socp``, ``portfolio``).
@@ -26,10 +28,31 @@ Attributes:
 import numpy as np
 from numpy.typing import NDArray
 
+from cosa.problem.socp import (
+    SIGN_CONVENTION,
+    SOCP,
+    ConeProduct,
+    MeanStdForm,
+    ProblemError,
+    SecondOrderCone,
+    SignConvention,
+)
+
 Vector = NDArray[np.float64]
 Matrix = NDArray[np.float64]
 
-# Deliberately narrow. Nothing else is public yet: every module named in the
-# subpackage list above arrives with its own issue, and each one extends this
-# surface as it lands rather than reserving a name in advance.
-__all__ = ["Matrix", "Vector"]
+# Deliberately narrow: every module named in the subpackage list above extends this
+# surface as it lands, rather than reserving a name in advance for code that does not
+# exist. What is here is the problem representation of `cosa.problem.socp` and the
+# array aliases every module shares.
+__all__ = [
+    "SIGN_CONVENTION",
+    "SOCP",
+    "ConeProduct",
+    "Matrix",
+    "MeanStdForm",
+    "ProblemError",
+    "SecondOrderCone",
+    "SignConvention",
+    "Vector",
+]

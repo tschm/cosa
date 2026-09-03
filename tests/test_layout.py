@@ -26,11 +26,27 @@ def test_subpackage_imports(name):
     assert module.__doc__, f"cosa.{name} has no docstring"
 
 
+# Every name `cosa.__init__` re-exports. The list grows as the modules named in the
+# subpackage docstrings land, and it is spelled out here so that a name arriving or
+# leaving is a deliberate edit to the public surface rather than a side effect.
+PUBLIC_SURFACE = [
+    "SIGN_CONVENTION",
+    "SOCP",
+    "ConeProduct",
+    "Matrix",
+    "MeanStdForm",
+    "ProblemError",
+    "SecondOrderCone",
+    "SignConvention",
+    "Vector",
+]
+
+
 def test_public_surface():
-    """The package exports the shared array aliases and nothing undeclared."""
+    """The package exports the array aliases, the problem representation, and no more."""
     import cosa
 
-    assert cosa.__all__ == ["Matrix", "Vector"]
+    assert cosa.__all__ == PUBLIC_SURFACE
     for name in cosa.__all__:
         assert hasattr(cosa, name), f"cosa.__all__ names {name}, which is missing"
 

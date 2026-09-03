@@ -14,7 +14,9 @@ authors = [
     { name = "Thomas Schmelzer", email = "thomas.schmelzer@gmail.com" }
 ]
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    "numpy>=1.26",
+]
 
 [build-system]
 requires = ["uv_build>=0.12.7,<0.13.0"]

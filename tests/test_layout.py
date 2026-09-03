@@ -41,8 +41,10 @@ PUBLIC_SURFACE = [
     "Matrix",
     "MeanStdForm",
     "MeanStdPortfolio",
+    "Multipliers",
     "ProblemError",
     "RowLayout",
+    "Scaling",
     "SecondOrderCone",
     "SignConvention",
     "SingularKktError",
@@ -55,6 +57,7 @@ PUBLIC_SURFACE = [
 # a name like `slack` or `position` only means something next to its module.
 NOT_AT_THE_ROOT = [
     "covariance_factor",
+    "equilibrate",
     "is_boundary",
     "position",
     "positions",
@@ -62,6 +65,12 @@ NOT_AT_THE_ROOT = [
     "slack",
     "tangent_row",
     "working_set_matrix",
+    # Types too, when the name is generic enough that the module is what gives it meaning.
+    # `cosa.Recorder` and `cosa.Metrics` say nothing about what is being recorded or
+    # measured; `instrumentation.Recorder` says it exactly. Same rule as the routines.
+    "Metrics",
+    "Recorder",
+    "InvariantChecker",
 ]
 
 # The other half of the rule: `cosa.experiments` is the harness that exercises the

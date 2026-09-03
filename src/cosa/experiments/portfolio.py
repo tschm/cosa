@@ -46,11 +46,30 @@ if it had not, this issue would have had to reopen the M1 representation.
 **Seeded, and therefore reproducible.** Every generator takes a ``seed`` and puts it in
 the instance's name, so a failing benchmark row names the instance that produced it. The
 market data itself comes from :func:`synthetic_market`, which controls rank and condition
-number exactly -- the two knobs the robustness families of #33 will turn.
+number exactly -- the two knobs the robustness families turn.
+
+**The robustness families are the opposite kind of instance.** §12.4 (``paper.tex:936``)
+asks for six adversarial families whose purpose is *"to identify failure modes **before**
+optimizing performance"*, and they are here too, below the six above. The distinction is
+worth keeping in mind while reading: everything above is built so that a failure is
+*attributable* -- well conditioned, feasible by construction, one pathology at a time
+absent. Everything below is built so that a failure *happens*. A generator that is careful
+about conditioning and a generator whose entire point is a condition number of ``1e10``
+belong to the same module because they are the same kind of object, but they are used for
+opposite purposes.
+
+Each robustness family ships with the measurement that shows it is pathological, through
+:func:`diagnose` -- which is what §12.4's "runnable as a standalone diagnostic" has to mean
+before the solver of #20 exists, and what #36's failure-mode study will extend. Two of the
+six are load-bearing for other issues: :func:`nearly_redundant` and
+:func:`degenerate_optimum` are what #25's rank detection has to survive, and
+:func:`nearly_active_cone` is what #29's hysteresis has to stop oscillating on. Neither can
+be shown to fix anything without them, which is why #43 schedules this ahead of M7.
 """
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Final
 
@@ -66,13 +85,24 @@ if TYPE_CHECKING:
 __all__ = [
     "BOX_WIDTH",
     "CONDITION",
+    "ILL_CONDITION",
     "LAMBDA",
+    "Diagnosis",
     "PortfolioInstance",
     "all_families",
+    "all_robustness",
+    "badly_scaled",
     "basic",
     "box",
+    "degenerate_optimum",
+    "diagnose",
     "factor_exposure",
+    "highly_correlated",
+    "ill_conditioned",
     "large",
+    "many_active_bounds",
+    "nearly_active_cone",
+    "nearly_redundant",
     "sector",
     "synthetic_market",
     "turnover",
@@ -657,4 +687,511 @@ def all_families(*, seed: int = 0) -> tuple[PortfolioInstance, ...]:
         factor_exposure(seed=seed),
         turnover(seed=seed),
         large(50, factors=5, seed=seed),
+    )
+
+
+# ======================================================================================
+# §12.4's robustness families: instances built so that something breaks
+# ======================================================================================
+
+
+ILL_CONDITION: Final = 1.0e10
+"""The default condition number for :func:`ill_conditioned`.
+
+Ten orders of magnitude, which is past the point where a ``float64`` Cholesky of the
+covariance loses every digit of the smallest eigenvalue: with ``eps`` around ``2.2e-16``,
+a condition number of ``1e10`` leaves roughly six digits, and the *square* root taken to
+form ``L`` leaves three. Chosen to be genuinely hostile while still having a well-defined
+answer for a reference solver to agree about -- past ``1e14`` the instance stops having one,
+and a test that cannot say what the right answer is cannot fail informatively.
+"""
+
+
+def nearly_redundant(
+    assets: int = 8,
+    *,
+    gap: float = 1.0e-9,
+    seed: int = 0,
+    lam: float = LAMBDA,
+) -> PortfolioInstance:
+    """§12.4's first family: two constraint rows that differ by ``gap``.
+
+    A box-constrained instance with one upper bound duplicated and perturbed. Both copies
+    become active together at the optimum, so the working-set matrix acquires two rows that
+    are identical to within ``gap`` -- and ``W_k`` is then numerically rank-deficient while
+    being algebraically full rank, which is the worst of the two cases. An exactly
+    duplicated row is caught by any rank test; a row that differs in the tenth digit is
+    caught only by a test with the right threshold, and that threshold is #25's problem.
+
+    This is the family that makes #25 demonstrable. Until it exists, "rank detection and
+    dependent-constraint removal" has nothing to detect: the direction solve of #12 raises
+    :class:`cosa.SingularKktError` on an *exactly* dependent set, and stays quiet while
+    returning nonsense on a nearly dependent one.
+
+    Args:
+        assets: the number of assets.
+        gap: how far the duplicate row is perturbed. Smaller is harder.
+        seed: the seed for the market data.
+        lam: the risk-aversion parameter.
+
+    Returns:
+        The instance. Its last inequality row is the near-duplicate of its first.
+
+    Raises:
+        ProblemError: if ``gap`` is negative.
+    """
+    if gap < 0.0:
+        raise ProblemError("gap", f"a perturbation is non-negative, found {gap}")
+    instance = box(assets, seed=seed, lam=lam)
+    duplicate = instance.portfolio.A[0:1].copy()
+    duplicate[0, 0] += gap
+    portfolio = instance.portfolio.with_inequalities(duplicate, instance.portfolio.b[0:1])
+    names = ConstraintNames(
+        inequalities=(*instance.names.inequalities, "near-duplicate of upper bound on asset 0"),
+        equalities=instance.names.equalities,
+        cones=instance.names.cones,
+    )
+    return _instance("nearly-redundant", assets, seed, portfolio, names, instance.witness)
+
+
+def highly_correlated(
+    assets: int = 8,
+    *,
+    correlation: float = 1.0 - 1.0e-8,
+    seed: int = 0,
+    lam: float = LAMBDA,
+) -> PortfolioInstance:
+    """§12.4's second family: assets whose correlations are all within ``1 - eps`` of one.
+
+    The covariance is ``(1 - rho) * I + rho * 1 1.T`` scaled to the usual volatility, so
+    every pair of assets has correlation exactly ``rho``. As ``rho`` approaches one the
+    matrix approaches rank one, and its smallest eigenvalue is ``1 - rho`` exactly -- so
+    this family is a *controlled* approach to rank deficiency, unlike
+    :func:`ill_conditioned`, which spreads the whole spectrum.
+
+    It is the family that puts the apex within reach numerically rather than exactly. The
+    factorization of #10 keeps every eigenvalue above its cut, so ``L`` has full rank and
+    the tangent direction ``u`` exists -- but along the near-null directions ``||L @ x||``
+    is tiny, so ``u`` is the normalization of a nearly-zero vector and its *direction* is
+    determined by rounding. #17's guard does not fire, because the tail has not vanished;
+    it has merely stopped meaning anything. That gap between "refused" and "meaningless" is
+    what this family probes.
+
+    Args:
+        assets: the number of assets.
+        correlation: the common pairwise correlation, in ``[0, 1)``.
+        seed: the seed for the expected returns.
+        lam: the risk-aversion parameter.
+
+    Returns:
+        The instance, long-only and fully invested.
+
+    Raises:
+        ProblemError: if the correlation is not in ``[0, 1)``. At exactly one the matrix is
+            rank one and the family is no longer *nearly* singular -- use
+            ``synthetic_market(rank=1)`` for that.
+    """
+    if not 0.0 <= correlation < 1.0:
+        raise ProblemError("correlation", f"expected a correlation in [0, 1), found {correlation}")
+    market = synthetic_market(assets, seed=seed, lam=lam)
+    covariance = (1.0 - correlation) * np.eye(assets) + correlation * np.ones((assets, assets))
+    covariance *= 0.2**2
+    portfolio = MeanStdPortfolio(
+        mu=market.mu,
+        Sigma=covariance,
+        lam=lam,
+        A=-np.eye(assets),
+        b=np.zeros(assets),
+        E=np.ones((1, assets)),
+        d=np.ones(1),
+    )
+    names = ConstraintNames(
+        inequalities=tuple(f"long-only bound on asset {i}" for i in range(assets)),
+        equalities=("fully invested",),
+        cones=("risk",),
+    )
+    equal = np.full(assets, 1.0 / assets)
+    return _instance("highly-correlated", assets, seed, portfolio, names, portfolio.socp_point(equal))
+
+
+def ill_conditioned(
+    assets: int = 8,
+    *,
+    condition: float = ILL_CONDITION,
+    seed: int = 0,
+    lam: float = LAMBDA,
+) -> PortfolioInstance:
+    """§12.4's third family: a covariance whose spectrum spans ``condition``.
+
+    :func:`synthetic_market` already takes the knob, so this family is that knob turned to
+    :data:`ILL_CONDITION` -- which is the point. The condition number is *exact* rather than
+    approximate, so the family can be swept: #28's scaling work is measured by whether the
+    conditioning of the assembled KKT matrix improves on these instances, and a sweep needs
+    the input conditioning to be a number rather than an outcome.
+
+    Different from :func:`highly_correlated` in a way that matters: there the whole
+    pathology is one near-null direction, here it is spread across the spectrum, so a
+    factorization that copes with a single tiny eigenvalue can still fail on this.
+
+    Args:
+        assets: the number of assets.
+        condition: the covariance's condition number.
+        seed: the seed for the market data.
+        lam: the risk-aversion parameter.
+
+    Returns:
+        The instance, long-only and fully invested.
+    """
+    market = synthetic_market(assets, seed=seed, lam=lam, condition=condition)
+    portfolio = _budget(market).with_inequalities(*_lower_bounds(assets, np.zeros(assets)))
+    names = ConstraintNames(
+        inequalities=tuple(f"long-only bound on asset {i}" for i in range(assets)),
+        equalities=("fully invested",),
+        cones=("risk",),
+    )
+    equal = np.full(assets, 1.0 / assets)
+    return _instance("ill-conditioned", assets, seed, portfolio, names, market.socp_point(equal))
+
+
+def nearly_active_cone(
+    assets: int = 8,
+    *,
+    gap: float = 1.0e-9,
+    seed: int = 0,
+    lam: float = LAMBDA,
+) -> PortfolioInstance:
+    """§12.4's fourth family: an iterate whose conic slack is ``gap``, not zero.
+
+    The one family whose pathology is in the *witness* rather than in the data, and that is
+    not a shortcut -- it is where the pathology has to be. For eq. (7) with ``lam > 0`` the
+    cone is *exactly* active at every optimum: any slack in it costs ``lam`` per unit, so
+    the optimum always has ``t = sigma(x)``. A family whose optimum has a nearly-active cone
+    therefore cannot be constructed. What §8.2 (``paper.tex:650``) is actually worried about
+    is an *iterate* sitting inside the activation band, where "numerical tolerances can lead
+    to oscillation between active and inactive states" -- so this family supplies exactly
+    that iterate.
+
+    The witness is the equal-weight portfolio with ``t`` raised by ``gap``, so its conic
+    slack is ``gap`` and the cone is inside any activation tolerance coarser than that while
+    being strictly interior to the cone. Handed to
+    :func:`cosa.active_set.updates.activate_cones` it activates; handed to
+    :func:`cosa.geometry.soc.is_interior` it is interior. Both are correct, and the
+    disagreement is the hysteresis problem #29 exists to solve.
+
+    Args:
+        assets: the number of assets.
+        gap: the conic slack at the witness. Smaller is deeper inside the band.
+        seed: the seed for the market data.
+        lam: the risk-aversion parameter.
+
+    Returns:
+        The instance, whose witness has a conic slack of exactly ``gap``.
+
+    Raises:
+        ProblemError: if ``gap`` is not positive. At zero the cone is exactly active, which
+            is the ordinary case and needs no family.
+    """
+    if gap <= 0.0:
+        raise ProblemError("gap", f"a nearly-active cone needs a positive slack, found {gap}")
+    instance = basic(assets, seed=seed, lam=lam)
+    witness = instance.witness.copy()
+    witness[-1] += gap
+    return _instance(
+        "nearly-active-cone",
+        assets,
+        seed,
+        instance.portfolio,
+        instance.names,
+        witness,
+        problem=instance.problem,
+    )
+
+
+def degenerate_optimum(assets: int = 8, *, seed: int = 0, lam: float = LAMBDA) -> PortfolioInstance:
+    """§12.4's fifth family: an optimum whose active constraints outnumber the variables.
+
+    Built to be degenerate by arithmetic rather than by tuning. The box cap is set to
+    exactly ``1 / assets``, so ``x_i <= 1/n`` for every ``i`` together with ``1.T @ x = 1``
+    admits precisely one point -- the equal-weight portfolio -- and every one of the ``n``
+    upper bounds is active there, alongside the budget equality. That is ``n + 1``
+    active constraints on ``n + 1`` variables, of which only ``n`` are independent: the
+    budget row is the sum of the upper-bound rows at the optimum.
+
+    So the primal solution is unique and the *multipliers are not*, which is the textbook
+    definition of primal degeneracy and the exact condition
+    :class:`cosa.SingularKktError` was written for. This family is what demonstrates that
+    #12's refusal to guess is a real behaviour rather than a defensive branch, and what
+    #25 has to make survivable.
+
+    Args:
+        assets: the number of assets.
+        seed: the seed for the market data. The optimum does not depend on it -- the
+            feasible set is a single point -- which is itself a useful property: the
+            degeneracy is not a lucky draw.
+        lam: the risk-aversion parameter.
+
+    Returns:
+        The instance, whose feasible set in ``x`` is the single equal-weight point.
+    """
+    instance = box(assets, upper=1.0 / assets, seed=seed, lam=lam)
+    return _instance(
+        "degenerate-optimum",
+        assets,
+        seed,
+        instance.portfolio,
+        instance.names,
+        instance.witness,
+        problem=instance.problem,
+    )
+
+
+def many_active_bounds(
+    assets: int = 20,
+    *,
+    slack: float = 1.1,
+    seed: int = 0,
+    lam: float = LAMBDA,
+) -> PortfolioInstance:
+    """§12.4's sixth family: most bounds active, without being degenerate.
+
+    The box cap is ``slack / assets``, a hair above the ``1 / assets`` that would pin the
+    portfolio completely. So the feasible set has interior, the optimum is not forced, and
+    yet almost every upper bound binds -- with a cap of ``1.1 / assets`` at most
+    ``assets / 1.1`` positions can be at it, so at least ninety per cent of the weight sits
+    on bounds.
+
+    The distinction from :func:`degenerate_optimum` is the whole point of having both. That
+    family tests what happens when the active set is *dependent*; this one tests what
+    happens when it is merely *large*. An active-set method can be perfectly correct on the
+    second and fail on the first, and a single family conflating them would not say which.
+
+    Args:
+        assets: the number of assets. Larger is more punishing, and this family defaults
+            larger than the others because its cost is the size of the active set.
+        slack: how much room above ``1 / assets`` the cap leaves, as a multiple. Must
+            exceed one.
+        seed: the seed for the market data.
+        lam: the risk-aversion parameter.
+
+    Returns:
+        The instance.
+
+    Raises:
+        ProblemError: if ``slack`` is not greater than one, which would make the instance
+            degenerate or infeasible rather than merely tight.
+    """
+    if slack <= 1.0:
+        raise ProblemError(
+            "slack",
+            f"expected slack > 1 so the box has interior, found {slack} -- at exactly 1 use degenerate_optimum",
+        )
+    instance = box(assets, upper=slack / assets, seed=seed, lam=lam)
+    return _instance(
+        "many-active-bounds",
+        assets,
+        seed,
+        instance.portfolio,
+        instance.names,
+        instance.witness,
+        problem=instance.problem,
+    )
+
+
+def all_robustness(*, seed: int = 0) -> tuple[PortfolioInstance, ...]:
+    """One instance of each of §12.4's six families.
+
+    The list #33's "done when" is checked against, and the one #36's failure-mode study
+    will iterate. Sizes are small enough to solve inside a test, because a pathology does
+    not need to be large to be a pathology -- :func:`many_active_bounds` is the exception
+    and keeps its larger default, since its whole content is the size of the active set.
+
+    Args:
+        seed: the seed handed to every family.
+
+    Returns:
+        The six instances, in the order §12.4 lists them.
+    """
+    return (
+        nearly_redundant(seed=seed),
+        highly_correlated(seed=seed),
+        ill_conditioned(seed=seed),
+        nearly_active_cone(seed=seed),
+        degenerate_optimum(seed=seed),
+        many_active_bounds(seed=seed),
+    )
+
+
+@dataclass(frozen=True, eq=False)
+class Diagnosis:
+    """What makes one instance hard, measured rather than asserted.
+
+    §12.4 asks that each robustness family be "runnable as a standalone diagnostic against
+    the current solver". There is no solver yet -- that is #20 -- so what runs against the
+    instance is the measurement itself: the numbers that say *which* pathology is present
+    and how severe it is. Each robustness family's test then asserts its own number, so a
+    family that stops being pathological (because a default moved, as the box cap once did)
+    fails rather than quietly passing.
+
+    Attributes:
+        instance: the instance's name.
+        status: what the reference solver said.
+        objective: the optimal value, or a non-finite value if there is not one.
+        covariance_condition: the ratio of largest to smallest nonzero eigenvalue of
+            ``Sigma``, or infinity if it is singular.
+        covariance_rank: the numerical rank of ``Sigma``.
+        active_rows: how many inequality rows are active at the point examined.
+        active_rank: the numerical rank of those rows stacked with ``E``. Below
+            :attr:`active_rows` plus the equality count means the active set is dependent.
+        independent_rows: how many rows the active set *would* need for
+            :attr:`active_rank` to be full -- the active rows plus every equality.
+        conic_slack: ``t - ||L @ x||`` at the point examined.
+        risk: ``sigma(x)`` at the point examined. A tiny value means the point is near the
+            apex, where the tangent direction is ill-determined.
+    """
+
+    instance: str
+    status: str
+    objective: float
+    covariance_condition: float
+    covariance_rank: int
+    active_rows: int
+    active_rank: int
+    independent_rows: int
+    conic_slack: float
+    risk: float
+
+    @property
+    def is_primal_degenerate(self) -> bool:
+        """Are the active constraints linearly dependent?
+
+        The condition that makes the multipliers non-unique, and so the condition
+        :class:`cosa.SingularKktError` reports and #25 has to remove.
+        """
+        return self.active_rank < self.independent_rows
+
+    def __str__(self) -> str:
+        """One line naming the instance and every measured pathology."""
+        degenerate = " DEGENERATE" if self.is_primal_degenerate else ""
+        return (
+            f"{self.instance}: {self.status} obj={self.objective:.6g} "
+            f"cond(Sigma)={self.covariance_condition:.2e} rank={self.covariance_rank} "
+            f"active={self.active_rows}(rank {self.active_rank}/{self.independent_rows}) "
+            f"conic slack={self.conic_slack:.2e} risk={self.risk:.2e}{degenerate}"
+        )
+
+
+def diagnose(
+    instance: PortfolioInstance,
+    at: Vector | None = None,
+    *,
+    tolerance: float = 1.0e-6,
+) -> Diagnosis:
+    """Measure what makes ``instance`` hard, at its optimum or at a given point.
+
+    Args:
+        instance: the instance to diagnose.
+        at: the point to examine, or ``None`` for the reference solver's optimum. Pass
+            :attr:`PortfolioInstance.witness` for a family whose pathology is in the
+            iterate rather than in the data -- :func:`nearly_active_cone` is the one.
+        tolerance: how close to its bound a row must be to count as active.
+
+    Returns:
+        The diagnosis.
+
+    Raises:
+        SolverUnavailableError: if ``at`` is ``None`` and no reference solver is available.
+    """
+    from cosa.experiments.reference import solve_reference
+
+    problem = instance.problem
+    if at is None:
+        solution = solve_reference(problem)
+        status, objective = solution.status, solution.objective
+        point = instance.witness if solution.z is None else solution.z
+    else:
+        point = _vector("at", at, size=problem.num_variables)
+        status, objective = "given", float(problem.c @ point)
+
+    eigenvalues = np.linalg.eigvalsh(instance.portfolio.Sigma)
+    cut = max(eigenvalues.max(initial=0.0), 0.0) * instance.num_assets * float(np.finfo(np.float64).eps)
+    positive = eigenvalues[eigenvalues > cut]
+    condition = float(positive.max() / positive.min()) if positive.size else math.inf
+
+    active = np.abs(problem.b - problem.A @ point) <= tolerance * np.maximum(1.0, np.abs(problem.b))
+    rows = np.vstack([problem.A[active], problem.E])
+    slack = problem.cone_slack(point)
+    return Diagnosis(
+        instance=instance.name,
+        status=status,
+        objective=objective,
+        covariance_condition=condition if positive.size == instance.num_assets else math.inf,
+        covariance_rank=int(positive.size),
+        active_rows=int(active.sum()),
+        active_rank=int(np.linalg.matrix_rank(rows)) if rows.size else 0,
+        independent_rows=int(active.sum()) + problem.num_equalities,
+        conic_slack=float(slack[0] - np.linalg.norm(slack[1:])),
+        risk=instance.portfolio.std(point[: instance.num_assets]),
+    )
+
+
+def badly_scaled(
+    assets: int = 8,
+    *,
+    weight_unit: float = 1.0e-4,
+    risk_unit: float = 1.0e6,
+    seed: int = 0,
+    lam: float = LAMBDA,
+) -> PortfolioInstance:
+    """An instance whose *units* disagree, which is what §13.3's five targets are about.
+
+    Not one of §12.4's six families. It belongs to
+    [#28](https://github.com/tschm/cosa/issues/28), because measuring that issue's work
+    needs an instance where scaling has something to do -- and, as
+    :func:`ill_conditioned` turns out to demonstrate, an ill-conditioned *covariance* is
+    not such an instance. See :mod:`cosa.linear_algebra.scaling` for why.
+
+    The pathology is a modelling one rather than a numerical one, and entirely realistic:
+    weights expressed in basis points instead of fractions, and the risk variable in
+    millions of currency instead of the same units as the returns. Neither is a mistake
+    anyone would notice by reading the model, and together they spread the constraint
+    matrix's entries over ten orders of magnitude. That is precisely the situation §13.3
+    lists "portfolio variables", "linear constraints" and "SOC variables" as separate
+    targets for.
+
+    Args:
+        assets: the number of assets.
+        weight_unit: the unit the weights are expressed in. The default of ``1e-4`` is
+            basis points, so a coefficient of ``1`` becomes ``1e4``.
+        risk_unit: the unit the risk variable ``t`` is expressed in.
+        seed: the seed for the market data.
+        lam: the risk-aversion parameter.
+
+    Returns:
+        The instance -- the same problem as :func:`box` up to a change of units, so its
+        optimum corresponds exactly and a solver that handles both must agree.
+
+    Raises:
+        ProblemError: if either unit is not positive.
+    """
+    if weight_unit <= 0.0 or risk_unit <= 0.0:
+        raise ProblemError("units", f"units are positive, found {weight_unit} and {risk_unit}")
+    instance = box(assets, seed=seed, lam=lam)
+    problem = instance.problem
+    units = np.append(np.full(assets, weight_unit), risk_unit)
+    rescaled = SOCP(
+        c=problem.c * units,
+        A=problem.A * units,
+        b=problem.b,
+        E=problem.E * units,
+        d=problem.d,
+        G=problem.G * units,
+        h=problem.h,
+        cone=problem.cone,
+    )
+    return PortfolioInstance(
+        name=f"badly-scaled-n{assets}-s{seed}",
+        portfolio=instance.portfolio,
+        problem=rescaled,
+        names=instance.names,
+        witness=instance.witness / units,
     )

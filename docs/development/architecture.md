@@ -23,13 +23,24 @@ Every package exists, each with a docstring naming the modules it will own. That
 deliberate: it means each later issue has an unambiguous home, and the module names
 above are authoritative even before the files exist. Landed so far: `problem/socp.py`,
 `problem/portfolio.py`, `geometry/soc.py`, `geometry/tangent.py`,
-`active_set/working_set.py`, `active_set/updates.py`, `linear_algebra/kkt.py`,
-`experiments/reference.py`, `experiments/portfolio.py` and `experiments/randomized.py`.
-The rest are still names.
+`active_set/working_set.py`, `active_set/updates.py`, `active_set/multipliers.py`,
+`linear_algebra/kkt.py`, `linear_algebra/scaling.py`, `solver/apex.py`,
+`solver/instrumentation.py`, `experiments/reference.py`, `experiments/portfolio.py` and
+`experiments/randomized.py`. The rest are still names.
 
-Two modules in the list above are **not** in the plan's table, both in `experiments`, and
-for the same underlying reason: the plan describes the *studies* it wants to run and is
-silent about the scaffolding they need.
+Four modules in the list above are **not** in the plan's table, and all four are the same
+kind of omission: the plan describes the *algorithm* and the *studies*, and is silent
+about the scaffolding both need.
+
+- `solver/apex.py`, the branch of [#24](https://github.com/tschm/cosa/issues/24). §8.1
+  calls the apex "a distinct direction computation inside the solver" without giving it a
+  module. It cannot live in `geometry/`, which is where its two ingredients are, because
+  it composes them with the working set and the KKT solve — it is the first module that
+  reaches into all three lower subpackages, which is what "inside the solver" means.
+- `solver/instrumentation.py`, the counters and invariants of
+  [#15](https://github.com/tschm/cosa/issues/15). §11 and §12.3 promise thirteen measured
+  quantities between them and §14 sets out two runtime invariants; the plan's `cosa.py`,
+  `initialization.py` and `termination.py` are the algorithm, not its measurement.
 
 - `experiments/reference.py`, the reference-solver oracle of
   [#21](https://github.com/tschm/cosa/issues/21). The plan puts solver comparison in
@@ -102,7 +113,14 @@ So: whichever issue first needs a factorization adds `scipy` to
 one: its KKT solve uses `numpy.linalg.solve`'s dense LU, which handles the symmetric
 indefinite saddle-point matrix correctly and is the least clever thing that is right --
 which is exactly what §13.1 asks a reference implementation to be. The sparse `LDL^T` and
-null-space methods are still ahead, and still SciPy's. If a dedicated LDL package
+null-space methods are still ahead, and still SciPy's.
+
+The dependent-row check in that solve is `numpy.linalg.matrix_rank`, an SVD per solve, and
+it is there because the obvious alternative does not work: `numpy.linalg.solve` raises only
+on an *exactly* zero pivot, so a genuinely degenerate working set produced a pivot of
+`1e-18`, returned successfully, and handed back enormous garbage. #33's degenerate-optimum
+family is what surfaced it. Paying for an SVD is the right trade in a module §13.1 asks to
+be reliable rather than fast; #26 and #27 will need something cheaper. If a dedicated LDL package
 turns out to beat SciPy, that is a decision for
 [#26](https://github.com/tschm/cosa/issues/26), which compares the strategies; nothing
 above prevents it.
@@ -150,7 +168,9 @@ as it lands, rather than reserving names in advance for code that does not exist
 `SIGN_CONVENTION`; `problem/portfolio.py` adds `MeanStdPortfolio`, `geometry/soc.py`
 adds `ConePosition`, `geometry/tangent.py` adds `ApexError`,
 `active_set/working_set.py` adds `WorkingSet`, `ConeStatus` and `ConstraintNames`, and
-`linear_algebra/kkt.py` adds `Direction`, `RowLayout` and `SingularKktError`.
+`linear_algebra/kkt.py` adds `Direction`, `RowLayout` and `SingularKktError`,
+`active_set/multipliers.py` adds `Multipliers`, and `linear_algebra/scaling.py` adds
+`Scaling`.
 
 Two rules decide what gets in, and both are asserted in `tests/test_layout.py` so that
 drifting from either is a deliberate edit rather than a side effect.
@@ -160,6 +180,11 @@ as `cosa.geometry.soc.is_boundary`, `cosa.geometry.tangent.tangent_row` or
 `cosa.active_set.updates.removal_candidate`. The reason is legibility rather than
 tidiness: `cosa.slack` and `cosa.position` say nothing about what they are the slack or
 the position *of*, while `cosa.geometry.soc.slack` says it exactly.
+
+The same test applies to types whose names are generic. `Recorder`, `Metrics` and
+`InvariantChecker` all cross subpackage boundaries and would qualify on that ground, but
+`cosa.Recorder` says nothing about what is being recorded, so they stay in
+`solver.instrumentation`.
 
 **The root holds the library, not the harness.** The algorithm's vocabulary is at the
 root -- the problem, the working set, the cone's position and status, the direction and

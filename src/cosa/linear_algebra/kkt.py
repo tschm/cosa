@@ -95,7 +95,9 @@ class SingularKktError(RuntimeError):
 
     §8.3 (``paper.tex:671``) is where the plan addresses this, through rank detection and
     the removal of dependent constraints, and #25 owns it. Until then a degenerate working
-    set is a diagnosable stop rather than a silent wrong answer.
+    set is a diagnosable stop rather than a silent wrong answer -- see :func:`solve` for why
+    that took an explicit rank test rather than catching ``LinAlgError``, and #33's
+    degenerate-optimum family for the instance that showed the difference.
     """
 
     def __init__(self, rows: int, variables: int) -> None:
@@ -233,6 +235,15 @@ def working_set_matrix(
       apex exactly, which is §8.1's "exact SOC membership" treatment rather than a
       hyperplane; the normal-cone conditions that decide *whether* to hold it there are
       #24's.
+
+    A pinned apex block is only *usable* where the apex is reachable, and those are the same
+    condition. Its ``cone.dim`` rows are ``1 + rank(L)``, so on a full-rank covariance they
+    already determine the whole direction -- ``G`` is square and invertible, ``G @ d = 0``
+    forces ``d = 0`` -- and one equality row on top of that makes the system dependent, which
+    :func:`solve` now reports. That is not a limitation to work around: with ``L`` invertible,
+    ``L @ x = 0`` implies ``x = 0``, so the apex is not reachable at any point a budget
+    equality admits. Rank deficiency is what makes the apex reachable *and* what leaves the
+    pinned system room to move, and #24's fixtures are rank-deficient for that reason.
 
     Args:
         problem: the instance.
@@ -391,7 +402,7 @@ class Direction:
         return float(_vector("g", gradient, size=self.d.size) @ self.d)
 
 
-def solve(system: KktSystem) -> Direction:
+def solve(system: KktSystem, *, rank_tolerance: float | None = None) -> Direction:
     """Factorize and solve one assembled system -- one call, one factorization.
 
     The factorization is ``numpy.linalg.solve``'s dense LU, which handles the symmetric
@@ -400,18 +411,40 @@ def solve(system: KktSystem) -> Direction:
     *reference* answer, which is what §13.1 asks the first implementation to be, and it is
     deliberately the least clever thing that is right.
 
+    **The rank of ``W`` is checked before the solve, not inferred from it.** The obvious
+    implementation -- solve, and catch ``LinAlgError`` -- does not work, and the
+    degenerate-optimum family of #33 is what showed it. ``numpy.linalg.solve`` raises only
+    on an *exactly* zero pivot, and a genuinely dependent working set produces a pivot of
+    ``1e-18`` rather than zero: LAPACK returns, the residual is small because LU always
+    makes the residual small, and the multipliers are enormous garbage. So the check that
+    made :class:`SingularKktError` a real behaviour rather than a defensive branch is an
+    explicit rank test on ``W``, which is both more direct -- dependent rows are what the
+    error is *about* -- and cheaper, ``W`` being smaller than the assembled matrix.
+
+    An SVD per solve is a real cost, and it is the right one to pay here: §13.1 asks this
+    implementation to be reliable rather than fast, and a reference that silently returns
+    garbage on a degenerate instance is not a reference. #26 and #27, which are allowed to
+    be fast, will need a cheaper test.
+
     Args:
         system: the assembled system.
+        rank_tolerance: the singular-value threshold below which a direction of ``W``
+            counts as absent, or ``None`` for ``numpy.linalg.matrix_rank``'s default of
+            ``max(m, n) * eps * sigma_max``. Raising it catches *nearly* dependent rows
+            too -- which is #25's problem, not this module's, so the knob is here and the
+            policy is not.
 
     Returns:
         The direction and its multipliers.
 
     Raises:
-        SingularKktError: if the matrix is singular, which means ``W`` has dependent rows.
+        SingularKktError: if ``W`` has linearly dependent rows.
     """
+    if system.num_rows and int(np.linalg.matrix_rank(system.W, tol=rank_tolerance)) < system.num_rows:
+        raise SingularKktError(system.num_rows, system.num_variables)
     try:
         solution = np.linalg.solve(system.matrix, system.rhs)
-    except np.linalg.LinAlgError as singular:
+    except np.linalg.LinAlgError as singular:  # pragma: no cover - the rank test catches this first
         raise SingularKktError(system.num_rows, system.num_variables) from singular
     variables = system.num_variables
     return Direction(
@@ -429,6 +462,7 @@ def direction(
     *,
     rho: float = RHO,
     tolerance: float = TOLERANCE,
+    rank_tolerance: float | None = None,
 ) -> Direction:
     """Assemble and solve in one call -- what step 5 of the §4.1 iteration does.
 
@@ -438,6 +472,7 @@ def direction(
         z: the current point.
         rho: the ``rho`` of ``H = rho*I``.
         tolerance: the vanishing-tail tolerance passed to the tangent rows.
+        rank_tolerance: the singular-value threshold for the dependent-row check.
 
     Returns:
         The direction and its multipliers.
@@ -445,7 +480,8 @@ def direction(
     Raises:
         SingularKktError: if the working-set rows are linearly dependent.
     """
-    return solve(assemble(problem, working_set, z, rho=rho, tolerance=tolerance))
+    system = assemble(problem, working_set, z, rho=rho, tolerance=tolerance)
+    return solve(system, rank_tolerance=rank_tolerance)
 
 
 def _require_same_shape(problem: SOCP, working_set: WorkingSet) -> None:

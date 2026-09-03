@@ -341,11 +341,37 @@ def test_an_inactive_cone_does_not_constrain_the_direction(problem, portfolio):
     assert tangent.tangent_residual(problem.cone_slack(interior), problem.G @ solution.d) != 0.0
 
 
-def test_an_apex_cone_holds_the_slack_direction_at_zero(problem, point):
-    """`G @ d = 0` on the pinned block, so a step keeps the slack at the apex exactly."""
+def test_an_apex_cone_holds_the_slack_direction_at_zero():
+    """`G @ d = 0` on the pinned block, so a step keeps the slack at the apex exactly.
+
+    On a *rank-deficient* covariance, which is the only place a pinned apex block leaves
+    anything to solve for. With `L` invertible the block's `1 + n` rows already force
+    `d = 0` on their own, and one equality on top makes the system dependent -- see
+    `working_set_matrix`. Rank deficiency is what makes the apex reachable and what leaves
+    the pinned direction room to move, so it is the honest setting for this test.
+    """
+    portfolio = MeanStdPortfolio.unconstrained(
+        mu=np.array([0.10, 0.04, 0.06]), Sigma=np.ones((3, 3)), lam=1.0
+    ).with_inequalities(np.vstack([np.eye(3), -np.eye(3)]), np.ones(6))
+    problem = portfolio.to_socp()
+    z = portfolio.socp_point(np.array([1.0, -1.0, 0.0]))
     working_set = updates.set_cone_status(WorkingSet.empty(problem), 0, ConeStatus.APEX)
-    solution = kkt.direction(problem, working_set, point)
+    solution = kkt.direction(problem, working_set, z)
     np.testing.assert_allclose(problem.G @ solution.d, 0.0, atol=1e-12)
+    assert np.linalg.norm(solution.d) > 1e-6, "and the direction is not merely zero"
+
+
+def test_a_pinned_full_rank_apex_block_over_determines_the_direction(problem, point):
+    """Its `1 + n` rows plus an equality are dependent, and the solve says so.
+
+    Recorded as a test because the arithmetic is the reason the previous test needs a
+    rank-deficient instance, and because it is the shape of dependency #25 will meet: not a
+    duplicated constraint, but a block that is individually fine and collectively too much.
+    """
+    working_set = updates.set_cone_status(WorkingSet.empty(problem), 0, ConeStatus.APEX)
+    assert working_set.num_rows > problem.num_variables
+    with pytest.raises(SingularKktError, match="linearly dependent"):
+        kkt.direction(problem, working_set, point)
 
 
 def test_the_conic_row_costs_exactly_one_row(problem, active, point):

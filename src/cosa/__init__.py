@@ -17,9 +17,10 @@ Subpackages:
     geometry: Second-order cone geometry (``soc``, ``tangent``, ``step``).
     active_set: Working set and its updates (``working_set``, ``multipliers``, ``updates``).
     linear_algebra: KKT systems and factorizations (``kkt``, ``factorization``, ``scaling``).
-    solver: The solver itself (``cosa``, ``initialization``, ``termination``).
-    experiments: Numerical studies (``reference``, ``portfolio``, ``frontier``,
-        ``benchmarks``).
+    solver: The solver itself (``apex``, ``instrumentation``, ``cosa``,
+        ``initialization``, ``termination``).
+    experiments: Numerical studies (``reference``, ``portfolio``, ``randomized``,
+        ``frontier``, ``benchmarks``).
 
 Attributes:
     Vector: A one-dimensional float array, used for ``x``, ``mu``, ``b`` and ``d``.
@@ -29,10 +30,12 @@ Attributes:
 import numpy as np
 from numpy.typing import NDArray
 
+from cosa.active_set.multipliers import Multipliers
 from cosa.active_set.working_set import ConeStatus, ConstraintNames, WorkingSet
 from cosa.geometry.soc import ConePosition
 from cosa.geometry.tangent import ApexError
 from cosa.linear_algebra.kkt import Direction, RowLayout, SingularKktError
+from cosa.linear_algebra.scaling import Scaling
 from cosa.problem.portfolio import MeanStdPortfolio
 from cosa.problem.socp import (
     SIGN_CONVENTION,
@@ -75,8 +78,10 @@ __all__ = [
     "Matrix",
     "MeanStdForm",
     "MeanStdPortfolio",
+    "Multipliers",
     "ProblemError",
     "RowLayout",
+    "Scaling",
     "SecondOrderCone",
     "SignConvention",
     "SingularKktError",

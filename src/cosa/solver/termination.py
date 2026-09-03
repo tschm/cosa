@@ -55,12 +55,27 @@ __all__ = [
     "residuals",
 ]
 
-TOLERANCE: Final = 1e-8
+TOLERANCE: Final = 1e-6
 """The default tolerance every residual is measured against.
 
 One number for all five, because they are all relative and all dimensionless once scaled
 by the data they come from -- see :func:`residuals`. A criterion with five separate knobs
 would need five justifications, and §6 offers one.
+
+**Set by what the algorithm can reach, not by what would be nice.** It began at ``1e-8``,
+which is right where exact arithmetic is available -- the hand-solved instances of #9 reach
+a residual of *zero*, and the polyhedral loop of #14 reaches ``1e-17``. But the prototype's
+conic path converges by retraction, and a backtracking line search locates the cone's
+boundary to about the square root of machine precision. Its stationarity residual therefore
+floors out near ``1e-8``, and whether a given instance lands just above or just below is
+decided by the BLAS: the ``sector`` family reaches ``9e-9`` on one numpy build and
+``1.08e-8`` on another, which made the difference between ``optimal`` and ``stalled``.
+
+A tolerance a method can only just reach is a tolerance that reports its own rounding as a
+failure. ``1e-6`` is an order of magnitude above the floor, which is far tighter than
+§16.3's cross-solver agreement needs and leaves the residual meaning what it says. Where
+exactness *is* available nothing is given up -- those instances still come out at zero, and
+the tests that care assert it directly rather than through this default.
 """
 
 

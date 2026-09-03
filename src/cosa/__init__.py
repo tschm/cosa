@@ -31,6 +31,8 @@ from numpy.typing import NDArray
 
 from cosa.active_set.working_set import ConeStatus, ConstraintNames, WorkingSet
 from cosa.geometry.soc import ConePosition
+from cosa.geometry.tangent import ApexError
+from cosa.linear_algebra.kkt import Direction, RowLayout, SingularKktError
 from cosa.problem.portfolio import MeanStdPortfolio
 from cosa.problem.socp import (
     SIGN_CONVENTION,
@@ -55,19 +57,29 @@ Matrix = NDArray[np.float64]
 # `cosa.geometry.soc.is_boundary` or `cosa.active_set.updates.removal_candidate`, because
 # their names only mean something next to their module: `cosa.slack` and `cosa.position`
 # would be unreadable at the root, and `cosa.geometry.soc.slack` is not.
+#
+# The line runs between the *library* and the *harness*. The algorithm's vocabulary is
+# here -- the problem, the working set, the cone's position and status, the direction and
+# its row layout, and the two errors a solver loop has to catch. The experiment harness of
+# `cosa.experiments` is not: its instance families, its random specifications and its
+# reference-solver oracle are how the library is exercised, not part of what it offers.
 __all__ = [
     "SIGN_CONVENTION",
     "SOCP",
+    "ApexError",
     "ConePosition",
     "ConeProduct",
     "ConeStatus",
     "ConstraintNames",
+    "Direction",
     "Matrix",
     "MeanStdForm",
     "MeanStdPortfolio",
     "ProblemError",
+    "RowLayout",
     "SecondOrderCone",
     "SignConvention",
+    "SingularKktError",
     "Vector",
     "WorkingSet",
 ]

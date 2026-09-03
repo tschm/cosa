@@ -21,20 +21,30 @@ section:
 
 Every package exists, each with a docstring naming the modules it will own. That is
 deliberate: it means each later issue has an unambiguous home, and the module names
-above are authoritative even before the files exist. Landed so far:
-`problem/socp.py`, `problem/portfolio.py`, `geometry/soc.py`,
-`active_set/working_set.py`, `active_set/updates.py` and `experiments/reference.py`.
+above are authoritative even before the files exist. Landed so far: `problem/socp.py`,
+`problem/portfolio.py`, `geometry/soc.py`, `geometry/tangent.py`,
+`active_set/working_set.py`, `active_set/updates.py`, `linear_algebra/kkt.py`,
+`experiments/reference.py`, `experiments/portfolio.py` and `experiments/randomized.py`.
 The rest are still names.
 
-One module in the list above is **not** in the plan's table:
-`experiments/reference.py`, the reference-solver oracle of
-[#21](https://github.com/tschm/cosa/issues/21). The plan puts solver comparison in
-`benchmarks`, but the oracle and the study are different things with different
-lifetimes -- §16.3 wants *every* generated problem cross-checked from M5 onward, while
-`benchmarks` is the M10 comparison table. Folding the oracle into `benchmarks` would
-have made every test that needs an oracle depend on the study module. The adapter got
-its own module; `benchmarks` still belongs to
-[#34](https://github.com/tschm/cosa/issues/34).
+Two modules in the list above are **not** in the plan's table, both in `experiments`, and
+for the same underlying reason: the plan describes the *studies* it wants to run and is
+silent about the scaffolding they need.
+
+- `experiments/reference.py`, the reference-solver oracle of
+  [#21](https://github.com/tschm/cosa/issues/21). The plan puts solver comparison in
+  `benchmarks`, but the oracle and the study are different things with different
+  lifetimes -- §16.3 wants *every* generated problem cross-checked from M5 onward, while
+  `benchmarks` is the M10 comparison table. Folding the oracle into `benchmarks` would
+  have made every test that needs an oracle depend on the study module. `benchmarks`
+  still belongs to [#34](https://github.com/tschm/cosa/issues/34).
+- `experiments/randomized.py`, the seeded random generator of
+  [#32](https://github.com/tschm/cosa/issues/32). §16.3 requires a comparison for "every
+  randomly generated test problem" and never says where those come from; the six families
+  in `experiments/portfolio.py` are fixed shapes, so no amount of reseeding makes them
+  randomly generated in the sense the requirement means. The generator randomizes the
+  *shape* -- dimension, rank, conditioning, active-set structure -- which is a different
+  job from producing a named family, so it is a different module.
 
 ## One deviation from the plan: where tests live
 
@@ -57,7 +67,13 @@ What survives from the plan is the *naming*: a module at `src/cosa/geometry/soc.
 tested by `tests/test_soc.py`, so the plan's five test-module names still say which test
 file a given piece of work belongs in.
 
-This is the only intentional divergence. Where the plan and the repository disagree
+That convention needs one tiebreak, because the plan's own table names two modules
+`portfolio` -- `problem.portfolio` and `experiments.portfolio`. A flat `tests/` directory
+cannot hold two `test_portfolio.py`, so the subpackage breaks the tie: the problem
+representation is tested by `tests/test_portfolio.py` and the instance families by
+`tests/test_portfolio_families.py`.
+
+Those are the only intentional divergences. Where the plan and the repository disagree
 about anything else, treat it as a bug in one of them and say so on the issue.
 
 ## Numerical stack
@@ -81,7 +97,12 @@ undeclared until something imports it for two reasons:
   option be recorded. This is that record.
 
 So: whichever issue first needs a factorization adds `scipy` to
-`[project].dependencies` in the same change that imports it. If a dedicated LDL package
+`[project].dependencies` in the same change that imports it. That issue was **not**
+[#12](https://github.com/tschm/cosa/issues/12), which had the first real reason to want
+one: its KKT solve uses `numpy.linalg.solve`'s dense LU, which handles the symmetric
+indefinite saddle-point matrix correctly and is the least clever thing that is right --
+which is exactly what §13.1 asks a reference implementation to be. The sparse `LDL^T` and
+null-space methods are still ahead, and still SciPy's. If a dedicated LDL package
 turns out to beat SciPy, that is a decision for
 [#26](https://github.com/tschm/cosa/issues/26), which compares the strategies; nothing
 above prevents it.
@@ -100,7 +121,15 @@ scope, so it belongs in the `test` dependency group (where CI installs it) and i
 
 The `mosek` and `gurobi` extras exist for the same reason in reverse: §12.1 names both
 as reference solvers, and both are license-gated, so the suite must run without them and
-skip cleanly. That is what `SolverUnavailableError` is for.
+skip cleanly. That is what `SolverUnavailableError` is for -- and it earns its keep: the
+gate installs every extra, so an unlicensed MOSEK is *present* in CI, and it fails in its
+own exception type rather than CVXPY's.
+
+**`hypothesis` is a test-group dependency**, added by
+[#32](https://github.com/tschm/cosa/issues/32). It was already assumed: `pytest.ini`
+registered a `property` marker that nothing used, and `rhiza-task hypothesis-test`
+reported `no hypothesis/property tests collected` on every run. The property tests in
+`tests/test_randomized.py` are what that gate was waiting for.
 
 ## Public surface
 
@@ -119,18 +148,25 @@ as it lands, rather than reserving names in advance for code that does not exist
 `problem/socp.py` was the first to do so, adding `SOCP`, `MeanStdForm`,
 `SecondOrderCone`, `ConeProduct`, `ProblemError`, `SignConvention` and
 `SIGN_CONVENTION`; `problem/portfolio.py` adds `MeanStdPortfolio`, `geometry/soc.py`
-adds `ConePosition`, and `active_set/working_set.py` adds `WorkingSet`, `ConeStatus`
-and `ConstraintNames`.
+adds `ConePosition`, `geometry/tangent.py` adds `ApexError`,
+`active_set/working_set.py` adds `WorkingSet`, `ConeStatus` and `ConstraintNames`, and
+`linear_algebra/kkt.py` adds `Direction`, `RowLayout` and `SingularKktError`.
 
-**What lands at the root is the shared vocabulary -- the types -- and not the
-routines.** A module's functions stay in the module, reached as
-`cosa.geometry.soc.is_boundary`, `cosa.problem.portfolio.covariance_factor` or
+Two rules decide what gets in, and both are asserted in `tests/test_layout.py` so that
+drifting from either is a deliberate edit rather than a side effect.
+
+**The root holds types, not routines.** A module's functions stay in the module, reached
+as `cosa.geometry.soc.is_boundary`, `cosa.geometry.tangent.tangent_row` or
 `cosa.active_set.updates.removal_candidate`. The reason is legibility rather than
 tidiness: `cosa.slack` and `cosa.position` say nothing about what they are the slack or
-the position *of*, while `cosa.geometry.soc.slack` says it exactly. The rule is asserted
-in `tests/test_layout.py`, so drifting from it is a deliberate edit rather than a side
-effect. `experiments/reference.py` is not re-exported at all -- it is the test
-scaffolding, not the library.
+the position *of*, while `cosa.geometry.soc.slack` says it exactly.
+
+**The root holds the library, not the harness.** The algorithm's vocabulary is at the
+root -- the problem, the working set, the cone's position and status, the direction and
+its row layout, and the two errors a solver loop has to catch. All of `cosa.experiments`
+stays where it is: its instance families, its random specifications and its
+reference-solver oracle are how the library is exercised, not part of what it offers, and
+a `cosa.PortfolioInstance` would suggest otherwise.
 
 ## The other decision recorded once
 

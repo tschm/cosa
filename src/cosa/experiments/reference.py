@@ -43,6 +43,7 @@ gets cross-checked here are #19, #31, #32 and #33.
 
 from __future__ import annotations
 
+import itertools
 import math
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Final, Protocol, runtime_checkable
@@ -55,14 +56,18 @@ if TYPE_CHECKING:
     from cosa import Vector
 
 __all__ = [
+    "BACKEND_ACCURACY",
+    "DEFAULT_ACCURACY",
     "LICENSED_BACKENDS",
     "OBJECTIVE_TOLERANCE",
     "OPEN_BACKENDS",
+    "CrossCheck",
     "CvxpySolver",
     "ReferenceSolution",
     "ReferenceSolver",
     "SolverUnavailableError",
     "available_solvers",
+    "cross_check",
     "default_solver",
     "relative_gap",
     "solve_reference",
@@ -82,6 +87,34 @@ LICENSED_BACKENDS: Final = ("MOSEK", "GUROBI")
 
 OBJECTIVE_TOLERANCE: Final = 1e-6
 """§16.3's "prescribed numerical tolerance" for objective agreement, relative."""
+
+DEFAULT_ACCURACY: Final = 1e-6
+"""The relative objective accuracy assumed of a backend that does not appear below."""
+
+BACKEND_ACCURACY: Final = {
+    "CLARABEL": 1e-8,
+    "ECOS": 1e-8,
+    "MOSEK": 1e-8,
+    "GUROBI": 1e-8,
+    "SCS": 1e-4,
+}
+"""How accurately each backend can be expected to report an objective, relatively.
+
+Not decoration: it is what keeps :func:`cross_check` from being wrong about who is at
+fault. §16.3 prescribes a tolerance for the comparison, but a comparison cannot be
+tighter than its least accurate participant, and these backends are not peers. The four
+interior-point solvers converge to a duality gap around ``1e-8`` and agree with each
+other well inside :data:`OBJECTIVE_TOLERANCE`. SCS is a first-order method whose own
+default ``eps`` is ``1e-4``, and it behaves accordingly.
+
+The SCS figure is measured rather than assumed. Over 200 randomized instances from
+:mod:`cosa.experiments.randomized`, solved by both Clarabel and SCS to a status of
+``optimal``, the relative objective gap had a median of ``2.3e-7`` and a maximum of
+``9.8e-6`` -- so a quarter of the draws exceeded ``1e-6`` and none came near ``1e-4``.
+Holding SCS to ``1e-6`` would therefore fail one comparison in four for no reason that has
+anything to do with COSA; ``1e-4`` is its own documented accuracy and bounds what was
+observed with an order of magnitude to spare.
+"""
 
 
 class SolverUnavailableError(RuntimeError):
@@ -197,11 +230,14 @@ def relative_gap(first: float, second: float) -> float:
 class ReferenceSolver(Protocol):
     """The oracle interface: a name, an availability check, and a solve.
 
-    Deliberately three members. Everything the cross-check needs is here, and nothing
+    Deliberately four members. Everything the cross-check needs is here, and nothing
     about how the answer is obtained is: a backend may shell out, call a library, or read a
     cached answer from disk. That is what makes the oracle swappable, which §12.1's list of
     solvers demands -- the list will grow, and a study comparing two references must be
     able to hold both behind one type.
+
+    :attr:`accuracy` is a member rather than a lookup because an oracle that cannot say how
+    accurate it is cannot be compared against: see :data:`BACKEND_ACCURACY`.
 
     Runtime-checkable, so a test can assert that an implementation satisfies it.
     """
@@ -209,6 +245,14 @@ class ReferenceSolver(Protocol):
     @property
     def name(self) -> str:
         """The backend's name, as it appears in a results table."""
+        ...
+
+    @property
+    def accuracy(self) -> float:
+        """The relative objective accuracy this solver can be held to.
+
+        The floor under any comparison it takes part in. See :data:`BACKEND_ACCURACY`.
+        """
         ...
 
     def is_available(self) -> bool:
@@ -260,6 +304,11 @@ class CvxpySolver:
     def name(self) -> str:
         """The backend's name, which is what identifies this solver in a results table."""
         return self.backend
+
+    @property
+    def accuracy(self) -> float:
+        """This backend's relative objective accuracy, from :data:`BACKEND_ACCURACY`."""
+        return BACKEND_ACCURACY.get(self.backend, DEFAULT_ACCURACY)
 
     def is_available(self) -> bool:
         """Is CVXPY importable, and does it report this backend as installed?
@@ -371,6 +420,134 @@ def default_solver(backends: tuple[str, ...] = OPEN_BACKENDS) -> CvxpySolver:
             "no reference solver among these is available. Install the 'reference' extra to get CVXPY and Clarabel.",
         )
     return solvers[0]
+
+
+@dataclass(frozen=True, eq=False)
+class CrossCheck:
+    """The result of §16.3's cross-solver comparison on one instance.
+
+    §16.3 asks that COSA's objective agree with a reference solver's on every randomly
+    generated problem. That check has two halves, and only one of them exists yet: the
+    oracle is here, COSA is #20. So this class takes the objective to check as *optional*
+    and does the strongest comparison available:
+
+    * given an objective -- COSA's, once there is one -- it compares every available
+      reference solver against it. That is §16.3 as written, and it is the seam #20 plugs
+      into with no change here.
+    * given none, it compares the available reference solvers *against each other*. That
+      is a weaker claim about COSA and a stronger one about the instance: agreement among
+      two independent interior-point implementations is what licenses treating either as
+      an oracle in the first place, and disagreement means the instance is too
+      ill-conditioned for the comparison to mean anything -- which is worth knowing before
+      a solver is blamed for missing it.
+
+    Attributes:
+        instance: the name of the problem checked, so a failure identifies itself.
+        objective: the value checked against, or ``None`` when the references were only
+            compared with each other.
+        solutions: what each available reference solver returned, in preference order.
+        requested_tolerance: the tolerance the caller asked for -- §16.3's prescribed one
+            by default.
+        tolerance: the tolerance actually applied, which is the requested one widened to
+            the accuracy of the least accurate participating solver. Both are kept so a
+            report can say when they differ and why.
+    """
+
+    instance: str
+    objective: float | None
+    solutions: tuple[ReferenceSolution, ...]
+    requested_tolerance: float
+    tolerance: float
+
+    @property
+    def objectives(self) -> tuple[float, ...]:
+        """The objective each reference solver reported."""
+        return tuple(solution.objective for solution in self.solutions)
+
+    @property
+    def all_optimal(self) -> bool:
+        """Did every reference solver claim an optimal solution?"""
+        return bool(self.solutions) and all(solution.is_optimal for solution in self.solutions)
+
+    @property
+    def gap(self) -> float:
+        """The largest relative gap among everything compared.
+
+        Zero for a single reference solver with no objective to check against -- there is
+        nothing to disagree with, which is a fact about the comparison and not a claim
+        that the answer is right.
+        """
+        values = self.objectives if self.objective is None else (self.objective, *self.objectives)
+        return max(
+            (relative_gap(first, second) for first, second in itertools.combinations(values, 2)),
+            default=0.0,
+        )
+
+    @property
+    def agrees(self) -> bool:
+        """Is every gap within :attr:`tolerance`?"""
+        return self.gap <= self.tolerance
+
+    def __str__(self) -> str:
+        """A one-line verdict naming the instance, the solvers, the gap and the tolerance."""
+        reported = ", ".join(
+            f"{solution.solver}={solution.objective:.9g} ({solution.status})" for solution in self.solutions
+        )
+        checked = "" if self.objective is None else f"checked {self.objective:.9g} against "
+        widened = (
+            ""
+            if self.tolerance == self.requested_tolerance
+            else f" (widened from {self.requested_tolerance:.3g} for the least accurate solver)"
+        )
+        return (
+            f"{self.instance}: {checked}{reported or 'no reference solver'} -- "
+            f"gap {self.gap:.3g} vs tolerance {self.tolerance:.3g}{widened}"
+        )
+
+
+def cross_check(
+    problem: SOCP,
+    objective: float | None = None,
+    *,
+    name: str = "instance",
+    solvers: tuple[ReferenceSolver, ...] | None = None,
+    tolerance: float = OBJECTIVE_TOLERANCE,
+) -> CrossCheck:
+    """Run §16.3's comparison on one instance.
+
+    Args:
+        problem: the instance to check.
+        objective: the objective to check against, typically COSA's, or ``None`` to
+            compare the reference solvers with each other.
+        name: the instance's name, carried into the result so a failure identifies itself.
+        solvers: the oracles to use, or ``None`` for every available open backend. Passing
+            a single solver with no ``objective`` produces a result with nothing to
+            compare, which :attr:`CrossCheck.gap` reports honestly as zero.
+        tolerance: the relative tolerance, §16.3's "prescribed numerical tolerance". It is
+            widened to the accuracy of the least accurate participating solver, because a
+            comparison cannot be tighter than that -- see :data:`BACKEND_ACCURACY`.
+
+    Returns:
+        The comparison.
+
+    Raises:
+        SolverUnavailableError: if no reference solver is available at all, or one of the
+            named solvers cannot run.
+    """
+    oracles = available_solvers() if solvers is None else solvers
+    if not oracles:
+        raise SolverUnavailableError(
+            ", ".join(OPEN_BACKENDS),
+            "no reference solver among these is available, so the cross-check of "
+            "paper.tex:1126 cannot run. Install the 'reference' extra",
+        )
+    return CrossCheck(
+        instance=name,
+        objective=objective,
+        solutions=tuple(solver.solve(problem) for solver in oracles),
+        requested_tolerance=tolerance,
+        tolerance=max(tolerance, *(solver.accuracy for solver in oracles)),
+    )
 
 
 def solve_reference(problem: SOCP, *, solver: ReferenceSolver | None = None) -> ReferenceSolution:

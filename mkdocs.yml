@@ -1,0 +1,19 @@
+# Repo-owned MkDocs configuration. Everything not set here -- theme, markdown
+# extensions, plugins, `docs_dir`, `site_dir: _book` -- is inherited from the
+# template-owned base. The base declares no site of its own, so this file is what
+# makes the book buildable: without it `rhiza-task book` prints
+# `skipped  book  no mkdocs.yml`, no `_book/` is produced, and the BOOK workflow's
+# pages upload fails on the missing directory.
+INHERIT: docs/mkdocs-base.yml
+
+site_name: cosa
+site_description: Convex optimisation sandbox.
+site_url: https://tschm.github.io/cosa/
+repo_url: https://github.com/tschm/cosa
+repo_name: tschm/cosa
+
+# nav is replaced wholesale by this file -- the base does not merge into it.
+nav:
+  - Home: index.md
+  - Development:
+      - Rhiza: development/rhiza.md

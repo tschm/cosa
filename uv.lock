@@ -129,6 +129,7 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "numpy" },
+    { name = "scipy" },
 ]
 
 [package.optional-dependencies]
@@ -165,6 +166,7 @@ requires-dist = [
     { name = "gurobipy", marker = "extra == 'gurobi'", specifier = ">=11" },
     { name = "mosek", marker = "extra == 'mosek'", specifier = ">=10" },
     { name = "numpy", specifier = ">=1.26" },
+    { name = "scipy", specifier = ">=1.11" },
 ]
 provides-extras = ["reference", "mosek", "gurobi"]
 

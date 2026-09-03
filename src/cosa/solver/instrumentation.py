@@ -270,6 +270,7 @@ class Recorder:
         z: Vector,
         *,
         rho: float = RHO,
+        regularization: float = 0.0,
     ) -> Direction:
         """Solve the direction subproblem, counting one factorization and one solve.
 
@@ -278,13 +279,15 @@ class Recorder:
             working_set: what is currently believed active.
             z: the current point.
             rho: the ``rho`` of ``H = rho*I``.
+            regularization: §8.3's ``delta``, passed through unchanged. A regularized solve
+                is still one factorization, so it counts the same.
 
         Returns:
             The direction, exactly as :func:`cosa.linear_algebra.kkt.direction` returns it.
         """
         self._kkt_solves += 1
         with self.factorizing():
-            return direction(problem, working_set, z, rho=rho)
+            return direction(problem, working_set, z, rho=rho, regularization=regularization)
 
     def iteration(self) -> None:
         """Count one active-set iteration."""

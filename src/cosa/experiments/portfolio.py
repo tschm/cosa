@@ -723,6 +723,14 @@ def nearly_redundant(
     duplicated row is caught by any rank test; a row that differs in the tenth digit is
     caught only by a test with the right threshold, and that threshold is #25's problem.
 
+    **The perturbation goes in a different coordinate, and that is not cosmetic.** The
+    obvious construction -- scale the duplicated row's own coefficient, ``a[0] += gap`` --
+    produces ``(1, 0, ...)`` and ``(1 + gap, 0, ...)``, which are *parallel*: the pair is
+    algebraically rank one for any ``gap``, and the family tests exact dependence rather
+    than near dependence. #25's rank detection found this by disagreeing with the docstring.
+    Perturbing a coordinate the row does not use tilts it instead, which is what makes the
+    pair independent-but-barely.
+
     This is the family that makes #25 demonstrable. Until it exists, "rank detection and
     dependent-constraint removal" has nothing to detect: the direction solve of #12 raises
     :class:`cosa.SingularKktError` on an *exactly* dependent set, and stays quiet while
@@ -744,7 +752,7 @@ def nearly_redundant(
         raise ProblemError("gap", f"a perturbation is non-negative, found {gap}")
     instance = box(assets, seed=seed, lam=lam)
     duplicate = instance.portfolio.A[0:1].copy()
-    duplicate[0, 0] += gap
+    duplicate[0, 1 % assets] += gap
     portfolio = instance.portfolio.with_inequalities(duplicate, instance.portfolio.b[0:1])
     names = ConstraintNames(
         inequalities=(*instance.names.inequalities, "near-duplicate of upper bound on asset 0"),

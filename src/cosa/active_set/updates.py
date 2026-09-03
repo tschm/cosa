@@ -12,6 +12,11 @@ them:
   :func:`removal_candidate` is that rule; :func:`drop_inequality` performs the removal.
 * **§7.3 SOC activation.** The cone becomes geometrically active when ``t - ||L @ x||_2``
   is small. :func:`activate_cones` applies that threshold to a conic slack.
+* **§8.3 dependent-constraint removal.** Not a §7 rule at all, but an active-set change,
+  which is why it is here rather than in the linear algebra: §8.3 lists it beside QR rank
+  detection and regularization, and it is the only one of the three that alters *what the
+  solver believes is active*. :func:`drop_dependent_rows` is it. Losing it among the
+  factorization work is the mistake #25 explicitly warns about.
 * **§7.4 SOC deactivation.** Deliberately *not* here. The plan calls it "a key research
   component" and says the decision must come from the conic multiplier and the normal-cone
   conditions rather than from the geometry, so it belongs to #23. What this module offers
@@ -60,6 +65,7 @@ __all__ = [
     "activation_candidates",
     "add_inequality",
     "cone_status_for",
+    "drop_dependent_rows",
     "drop_inequality",
     "inequality_slack",
     "removal_candidate",
@@ -296,3 +302,54 @@ def activate_cones(
             continue
         updated = set_cone_status(updated, index, argued)
     return updated
+
+
+def drop_dependent_rows(
+    problem: SOCP,
+    working_set: WorkingSet,
+    z: Vector,
+    *,
+    tolerance: float | None = None,
+) -> tuple[WorkingSet, tuple[int, ...]]:
+    """§8.3's dependent-constraint removal: drop active rows that add nothing.
+
+    The item #25 flags as easy to lose, because it sits on a list with QR rank detection
+    and regularization and is the only one of the three that is not linear algebra. A
+    pivoted QR says *which* rows are redundant -- see
+    :func:`cosa.linear_algebra.rank.analyse` -- and this decides which of those the working
+    set is allowed to let go of.
+
+    **Only inequalities may be dropped, and that is not a simplification.** §3.1 imposes
+    every equality unconditionally, so an equality row is not the solver's to remove even
+    when it is the redundant one; and a cone's rows encode a geometric belief that §7.4
+    hands to the conic multiplier, so removing one is #23's decision and not a numerical
+    repair. When the dependency lies entirely among rows that cannot be dropped, this
+    returns the set unchanged and the caller falls back to regularization -- which is
+    exactly why §8.3 lists both.
+
+    Args:
+        problem: the instance.
+        working_set: the set whose rows may be dependent.
+        z: the current point, needed to build the tangent rows.
+        tolerance: the pivot threshold, or ``None`` for the default.
+
+    Returns:
+        The set with the droppable dependent rows removed, and the inequality row indices
+        that were dropped. An empty tuple means nothing could be dropped -- either because
+        the set was independent or because the redundancy was not the solver's to remove.
+    """
+    from cosa.linear_algebra.kkt import RowLayout, working_set_matrix
+    from cosa.linear_algebra.rank import analyse
+
+    analysis = analyse(working_set_matrix(problem, working_set, z), tolerance=tolerance)
+    if not analysis.is_deficient:
+        return working_set, ()
+
+    layout = RowLayout.for_working_set(working_set)
+    droppable = [
+        layout.inequalities[position] for position in analysis.dependent if position < len(layout.inequalities)
+    ]
+    updated = working_set
+    for index in droppable:
+        updated = drop_inequality(updated, index)
+    return updated, tuple(droppable)

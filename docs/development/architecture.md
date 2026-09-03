@@ -23,12 +23,14 @@ Every package exists, each with a docstring naming the modules it will own. That
 deliberate: it means each later issue has an unambiguous home, and the module names
 above are authoritative even before the files exist. Landed so far: `problem/socp.py`,
 `problem/portfolio.py`, `geometry/soc.py`, `geometry/tangent.py`,
-`active_set/working_set.py`, `active_set/updates.py`, `active_set/multipliers.py`,
-`linear_algebra/kkt.py`, `linear_algebra/scaling.py`, `solver/apex.py`,
-`solver/instrumentation.py`, `experiments/reference.py`, `experiments/portfolio.py` and
-`experiments/randomized.py`. The rest are still names.
+`geometry/step.py`, `active_set/working_set.py`, `active_set/updates.py`,
+`active_set/multipliers.py`, `linear_algebra/kkt.py`, `linear_algebra/rank.py`,
+`linear_algebra/scaling.py`, `solver/apex.py`, `solver/cosa.py`,
+`solver/initialization.py`, `solver/instrumentation.py`, `solver/termination.py`,
+`experiments/reference.py`, `experiments/portfolio.py` and `experiments/randomized.py`.
+The rest are still names.
 
-Four modules in the list above are **not** in the plan's table, and all four are the same
+Five modules in the list above are **not** in the plan's table, and all five are the same
 kind of omission: the plan describes the *algorithm* and the *studies*, and is silent
 about the scaffolding both need.
 
@@ -37,6 +39,10 @@ about the scaffolding both need.
   module. It cannot live in `geometry/`, which is where its two ingredients are, because
   it composes them with the working set and the KKT solve — it is the first module that
   reaches into all three lower subpackages, which is what "inside the solver" means.
+- `linear_algebra/rank.py`, §8.3's rank detection and null-space route for
+  [#25](https://github.com/tschm/cosa/issues/25). The plan's `factorization.py` is about
+  *reuse* across iterations (#27); detecting a degenerate working set is a different job
+  with a different lifetime, and it is needed several waves earlier.
 - `solver/instrumentation.py`, the counters and invariants of
   [#15](https://github.com/tschm/cosa/issues/15). §11 and §12.3 promise thirteen measured
   quantities between them and §14 sets out two runtime invariants; the plan's `cosa.py`,
@@ -107,8 +113,14 @@ undeclared until something imports it for two reasons:
   libraries can be selected at the start of implementation"* -- and asks only that the
   option be recorded. This is that record.
 
-So: whichever issue first needs a factorization adds `scipy` to
-`[project].dependencies` in the same change that imports it. That issue was **not**
+**That prediction came true at #25, exactly as written.** §8.3 asks for "QR-based rank
+detection", pivoted QR is the one factorization NumPy does not have, and
+`linear_algebra/rank.py` is the change that both imports SciPy and declares it. The
+milestone was M7, as recorded.
+
+The rest of the paragraph still stands: whichever issue first needs a factorization adds
+`scipy` to `[project].dependencies` in the same change that imports it. That issue was
+**not**
 [#12](https://github.com/tschm/cosa/issues/12), which had the first real reason to want
 one: its KKT solve uses `numpy.linalg.solve`'s dense LU, which handles the symmetric
 indefinite saddle-point matrix correctly and is the least clever thing that is right --

@@ -126,8 +126,15 @@ def test_the_nearly_redundant_family_has_a_near_duplicate_row():
     assert difference == pytest.approx(1e-9, rel=1e-6)
     assert "near-duplicate" in instance.names.inequalities[-1]
 
-    diagnosis = families.diagnose(instance)
-    assert diagnosis.is_primal_degenerate, "the near-duplicate is active alongside its original"
+    # Nearly dependent, not dependent: the pair has full rank and a smallest singular
+    # direction of about `gap`. That distinction is the whole family, and it took #25's
+    # rank detection to notice the first version of this generator did not have it -- it
+    # perturbed the row's magnitude, leaving the two rows exactly parallel.
+    from cosa.linear_algebra import rank as rk
+
+    pair = rk.analyse(np.vstack([rows[0], rows[-1]]))
+    assert pair.rank == 2, "independent"
+    assert pair.smallest == pytest.approx(1e-9, rel=1e-3), "but only by `gap`"
 
 
 def test_the_nearly_redundant_gap_is_a_knob():

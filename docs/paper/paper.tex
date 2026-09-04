@@ -1828,6 +1828,48 @@ a clear characterization of when conic active-set methods work well,
 why they work well, and how their geometry differs fundamentally from
 polyhedral active-set methods.
 
+\subsection{Outcome}
+
+Four of the seven hold without qualification, three hold with one,
+and the qualifications are the results worth having.
+
+\begin{center}
+\begin{tabular}{clp{5.4cm}}
+\hline
+& criterion & outcome\\
+\hline
+1 & solves the portfolio SOCPs to high accuracy & \textbf{yes},
+on twelve of the thirteen instance families\\
+2 & termination on meaningful conic KKT residuals & \textbf{yes, and
+not sufficient} --- Section 15.6\\
+3 & working-set decisions interpretable as active constraints &
+yes\\
+4 & reliable warm starts on sequences & \textbf{conditionally} ---
+where the active set transfers, Section 15.3\\
+5 & solutions agree with established SOCP solvers & \textbf{no}, on
+one family --- Section 15.6\\
+6 & numerical behaviour understood on degenerate and
+ill-conditioned problems & yes, including where it is wrong\\
+7 & modular enough for extensions beyond portfolios & yes,
+demonstrated rather than asserted\\
+\hline
+\end{tabular}
+\end{center}
+
+Criterion~2 is the one that repays attention. The residuals are
+mathematically meaningful, which is what it asked for; they are not
+\emph{sufficient}, which it did not think to ask. Criterion~5 fails on
+the same instance and for the same reason. Both are Section 15.6, and
+both are consequences of normalizing a residual by $\|c\|_\infty$ ---
+a choice made for good reasons in a formulation where $\|c\|_\infty$
+is large for reasons of scaling rather than of size.
+
+Criterion~4 is qualified in a more interesting way. Warm starting is
+reliable exactly where the \emph{combinatorial} state transfers, and
+that is not the same condition as the problems being close: a frontier
+can move steadily in $\lambda$ while its active set jumps. Where the
+working set must be corrected, warm starting costs more than it saves.
+
 \subsection{The Characterization}
 
 That characterization is the project's principal result and is stated

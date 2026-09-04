@@ -1,8 +1,9 @@
 """The ratio test: how far a step may go, and what stops it.
 
-The linear half of §5.2 (`paper.tex:471`), which is what issue #14's loop needs. The conic
-half is eq. (6) and is #18's; this file also pins the *refusal* that stands in for it, so
-that the missing interval cannot be silently skipped.
+§5.2's three intervals (`paper.tex:471`) -- linear, conic, explicit -- and their
+intersection. The linear half arrived with issue #14's loop; the conic half is #18's and is
+tested in `test_cone_step.py`, which is where eq. (6)'s correction is pinned down. This
+file covers the ratio test, the intersection, and the report.
 """
 
 import math
@@ -13,6 +14,7 @@ import pytest
 from cosa import SOCP, ProblemError, WorkingSet
 from cosa.active_set import updates
 from cosa.experiments import portfolio as families
+from cosa.geometry import soc
 from cosa.geometry import step as st
 
 
@@ -125,53 +127,57 @@ def test_a_non_positive_explicit_bound_is_rejected(box):
 
 
 # ----------------------------------------------------------------------------------
-# The conic interval is #18's, and its absence is loud
+# The conic interval, now that #18 has supplied it
 # ----------------------------------------------------------------------------------
 
 
-def test_a_cone_that_could_bind_is_refused_not_ignored():
-    """Issue #14's scope boundary, enforced rather than documented.
+def test_the_cone_bounds_the_step_on_a_portfolio():
+    """What Wave 4 refused to answer, answered: the cone is one of the three intervals.
 
-    A ratio test that silently omitted the conic bound would produce iterates outside the
-    cone, and §14.1's Level 1 invariant would start failing several modules away from the
-    cause. So it refuses, and the message names the issue that fixes it.
+    The direction moves `L @ x` while leaving `t` alone, so the tail grows and the head does
+    not and the cone is what stops the step. `np.ones` would not do: it raises `t` faster
+    than the tail, which is a direction into the cone's interior and is never blocked.
     """
     instance = families.basic(4, seed=0)
     problem = instance.problem
-    with pytest.raises(ProblemError, match="#18"):
-        st.step_limit(problem, instance.witness, np.ones(problem.num_variables), WorkingSet.empty(problem))
+    direction = np.concatenate([np.ones(instance.num_assets), [0.0]])
+    limit = st.step_limit(problem, instance.witness, direction, WorkingSet.empty(problem))
+    assert limit.source == "cone"
+    assert math.isfinite(limit.alpha)
+    assert limit.alpha == pytest.approx(0.0), "the witness is exactly on the boundary"
 
 
-def test_a_strictly_interior_cone_is_refused_too():
-    """The guard is unconditional on the direction moving the block, and has to be.
+def test_a_step_from_a_strictly_interior_cone_is_still_bounded():
+    """The regression test for a bug the invariant checker caught in Wave 4.
 
-    An earlier version exempted a strictly interior factor, reasoning that the linear
-    interval already bounded the step. It does bound it -- but not by enough to stay inside
-    the cone, so a step from an interior point could leave it. §14.1's checker caught that
-    on a Phase I solve; this test is what stops it coming back.
+    That version exempted a strictly interior factor from the guard, reasoning that the
+    linear interval already bounded the step. It does bound it -- but not by enough to stay
+    inside the cone. Now the interval is computed rather than assumed away, and a step from
+    an interior point lands inside the cone.
     """
     instance = families.basic(4, seed=0)
     problem = instance.problem
     interior = instance.witness.copy()
     interior[-1] += 10.0
-    from cosa.geometry import soc
+    direction = np.concatenate([np.full(instance.num_assets, 100.0), [0.0]])
+    limit = st.step_limit(problem, interior, direction, WorkingSet.empty(problem))
 
-    assert soc.is_interior(problem.cone_slack(interior)), "strictly inside, and still refused"
-    with pytest.raises(ProblemError, match="#18"):
-        st.step_limit(problem, interior, np.ones(problem.num_variables), WorkingSet.empty(problem))
+    assert soc.is_interior(problem.cone_slack(interior))
+    assert math.isfinite(limit.alpha)
+    assert soc.is_member(problem.cone_slack(interior + limit.alpha * direction), tolerance=1e-9)
 
 
-def test_a_direction_that_does_not_move_the_cone_does_not_refuse():
-    """The other safe case: the cone is on its boundary but the step leaves it alone."""
-    instance = families.basic(4, seed=0)
+def test_the_tightest_of_the_three_intervals_wins():
+    """§5.2's intersection, with all three present."""
+    instance = families.box(5, seed=0)
     problem = instance.problem
-    still = np.zeros(problem.num_variables)
-    assert st.step_limit(problem, instance.witness, still, WorkingSet.empty(problem)).is_unbounded
-
-
-def test_a_problem_with_no_cone_never_refuses(box):
-    """The linear programs the Phase I loop actually runs on."""
-    assert st.step_limit(box, np.zeros(2), np.array([1.0, 0.0]), WorkingSet.empty(box)).alpha == pytest.approx(1.0)
+    direction = np.ones(problem.num_variables)
+    unbounded = st.step_limit(problem, instance.witness, direction, WorkingSet.empty(problem))
+    capped = st.step_limit(
+        problem, instance.witness, direction, WorkingSet.empty(problem), max_step=unbounded.alpha / 2
+    )
+    assert capped.source == "bound"
+    assert capped.alpha == pytest.approx(unbounded.alpha / 2)
 
 
 # ----------------------------------------------------------------------------------

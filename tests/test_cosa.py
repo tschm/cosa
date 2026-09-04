@@ -18,7 +18,7 @@ Correctness is measured against the reference solver of #21 on every instance, w
 import numpy as np
 import pytest
 
-from cosa import SOCP, MeanStdPortfolio, ProblemError, SingularKktError
+from cosa import SOCP, ConeStatus, MeanStdPortfolio, ProblemError, SingularKktError
 from cosa.experiments import portfolio as families
 from cosa.experiments import randomized, reference
 from cosa.solver import cosa
@@ -193,6 +193,22 @@ def test_the_iteration_limit_is_reported_rather_than_hit_silently():
     assert solution.metrics.iterations <= 1
 
 
+def test_an_exhausted_loop_reports_optimal_when_the_point_is():
+    """The iteration limit is a stopping rule, not a verdict on the answer.
+
+    Two iterations from an interior start land exactly on the optimum, and the loop runs out
+    before it can verify. The residuals are recomputed anyway, found within tolerance, and
+    the status is `optimal` -- because §14.3's Level 3 is a certificate about a *point*, not
+    about how the point was reached.
+    """
+    box = SOCP.unconstrained(np.array([-1.0, -2.0])).add_inequalities(
+        np.vstack([np.eye(2), -np.eye(2)]), np.array([1.0, 1.0, 0.0, 0.0])
+    )
+    stopped = cosa.solve(box, start=np.array([0.5, 0.5]), max_iterations=2, checker=CHECKED)
+    np.testing.assert_allclose(stopped.z, [1.0, 1.0], atol=1e-9)
+    assert stopped.status == "optimal"
+
+
 def test_a_non_positive_iteration_limit_is_rejected():
     """Zero iterations is not a solve."""
     with pytest.raises(ProblemError, match="at least one iteration"):
@@ -267,44 +283,17 @@ def test_regularization_is_the_fallback_and_can_be_switched_off():
     assert cosa.solve(problem, regularization=1e-8, checker=CHECKED).is_optimal
 
 
-# ----------------------------------------------------------------------------------
-# What it cannot do yet, said out loud
-# ----------------------------------------------------------------------------------
-
-
-def test_a_portfolio_whose_cone_binds_is_refused():
-    """Issue #14's scope: §9 Phase I is the polyhedral baseline, and eq. (7)'s cone always binds.
-
-    Refused with a message naming #18 rather than solved wrongly. #20 is where this starts
-    working, and nothing about the loop changes when it does -- only what `step_limit`
-    returns.
-    """
-    instance = families.basic(4, seed=0)
-    with pytest.raises(ProblemError, match="#18"):
-        cosa.solve(instance.problem, start=instance.witness)
-
-
-def test_a_randomized_instance_is_refused_for_the_same_reason():
-    """The same boundary, on an instance nobody chose."""
-    instance = randomized.random_instance(3)
-    with pytest.raises(ProblemError, match="#18"):
-        cosa.solve(instance.problem, start=instance.witness)
-
-
 def test_an_irreparable_degeneracy_stops_the_loop_unless_regularized():
     """The path §8.3 keeps regularization for: a dependency the working set may not remove.
 
     Two identical equality rows, which §3.1 forbids dropping. With `delta = 0` the loop
-    stops and says `degenerate`; with `delta > 0` it gets an answer to a nearby problem and
-    runs to a conclusion instead.
+    stops and says `degenerate`; with `delta > 0` it runs to a conclusion instead.
 
-    *Which* conclusion is the honest part. On this instance the objective is constant on the
-    feasible line, so the true direction at every point is exactly zero -- and the
-    regularized one is `O(delta)`, which with nothing to block a step reads as an improving
-    direction. So the loop concludes `unbounded`. That is the documented cost of the
-    fallback rather than a defect: it answers a nearby question, and near questions can have
-    different answers. It is also why `REGULARIZATION` is small and why
-    dependent-constraint removal is always tried first.
+    *Which* conclusion is the honest part. The objective is constant on the feasible line
+    here, so the true direction is exactly zero everywhere -- and the regularized one is
+    `O(delta)`, which with nothing to block a step reads as an improving direction. The loop
+    concludes `unbounded`. That is the documented cost of answering a nearby question, and
+    it is why `REGULARIZATION` is small and removal is always tried first.
     """
     flat = SOCP.unconstrained(np.array([1.0, 1.0])).add_equalities([[1.0, 1.0], [1.0, 1.0]], [1.0, 1.0])
 
@@ -339,14 +328,62 @@ def test_regularization_lets_the_direction_solve_proceed_where_removal_cannot():
     assert np.all(np.isfinite(step.multipliers))
 
 
-def test_phase_one_runs_on_a_coned_instance_and_the_cone_is_what_refuses():
-    """Phase I completes, raises the free heads, and *then* the step guard stops the solve.
+# ----------------------------------------------------------------------------------
+# What it cannot do yet, said out loud
+# ----------------------------------------------------------------------------------
+
+
+def test_a_portfolio_stalls_at_the_cone_because_the_cone_is_never_activated():
+    """The exact remaining gap, and #20 is what closes it.
+
+    The step interval of #18 now keeps every iterate inside the cone -- Level 1 holds
+    throughout, and the invariant checker is on. But the loop never *activates* the cone, so
+    the working set has no tangent row, the direction keeps pointing out of the cone, and
+    the exact step is zero. The loop runs to its iteration limit without moving.
+
+    Asserted rather than left to be discovered: a stall that produced a wrong answer with an
+    `optimal` status would be far worse than one that says `iteration_limit`, and this is
+    what makes the difference visible.
+    """
+    instance = families.basic(5, seed=0)
+    solution = cosa.solve(instance.problem, checker=CHECKED)
+
+    assert solution.status == "iteration_limit"
+    assert solution.working_set.status(0) is ConeStatus.INACTIVE, "the cone was never activated"
+    assert solution.residuals.primal < 1e-9, "and yet every iterate stayed feasible"
+    assert solution.residuals.stationarity > 1e-3, "which is why it is not optimal"
+
+
+def test_the_stall_keeps_every_iterate_feasible():
+    """§14.1 holds even where the loop cannot make progress.
+
+    The distinction worth having: not converging and being *wrong* are different failures,
+    and the invariant is what separates them. #20 fixes the first; the second never happened.
+    """
+    from cosa.solver.instrumentation import level_1_violations
+
+    for instance in (families.basic(5, seed=0), families.box(5, seed=0)):
+        solution = cosa.solve(instance.problem, checker=CHECKED, max_iterations=20)
+        assert level_1_violations(instance.problem, solution.z) == (), instance.name
+
+
+def test_a_randomized_instance_stalls_the_same_way():
+    """The same boundary on an instance nobody chose."""
+    instance = randomized.random_instance(3)
+    solution = cosa.solve(instance.problem, checker=CHECKED, max_iterations=20)
+    assert solution.status == "iteration_limit"
+    assert solution.working_set.status(0) is ConeStatus.INACTIVE
+
+
+def test_phase_one_runs_on_a_coned_instance():
+    """Initialization completes on a portfolio, and raises the cone's head with a margin.
 
     An instance whose equal-weight point violates a floor, so route 2 fails and the elastic
-    relaxation runs. That path ends by raising the cone's head with a margin -- so the start
-    it produces is feasible in every block -- and the refusal that follows comes from the
-    step limit, not from initialization. Exactly the scope boundary #14 draws.
+    relaxation runs. The start it produces is feasible in every block, cone included -- which
+    is what lets the loop get as far as the cone before stalling.
     """
+    from cosa.solver.instrumentation import level_1_violations
+
     portfolio = MeanStdPortfolio(
         mu=np.array([0.10, 0.04, 0.06, 0.05]),
         Sigma=np.diag([0.04, 0.09, 0.16, 0.05]),
@@ -357,42 +394,9 @@ def test_phase_one_runs_on_a_coned_instance_and_the_cone_is_what_refuses():
         d=np.ones(1),
     )
     problem = portfolio.to_socp()
-    with pytest.raises(ProblemError, match="#18"):
-        cosa.solve(problem, checker=CHECKED)
-
-
-def test_an_exhausted_loop_reports_optimal_when_the_point_is():
-    """The iteration limit is a stopping rule, not a verdict on the answer.
-
-    Two iterations from an interior start land exactly on the optimum, and the loop runs
-    out before it can verify. `_finish` recomputes the residuals anyway, finds them within
-    tolerance, and reports `optimal` -- because Level 3 is a certificate about a point, not
-    about how the point was reached.
-    """
-    box = SOCP.unconstrained(np.array([-1.0, -2.0])).add_inequalities(
-        np.vstack([np.eye(2), -np.eye(2)]), np.array([1.0, 1.0, 0.0, 0.0])
-    )
-    stopped = cosa.solve(box, start=np.array([0.5, 0.5]), max_iterations=2, checker=CHECKED)
-    np.testing.assert_allclose(stopped.z, [1.0, 1.0], atol=1e-9)
-    assert stopped.status == "optimal"
-
-
-def test_a_phase_one_start_repairs_the_cone_before_returning():
-    """Route 3 drops the cone, so the head is raised afterwards -- with a margin.
-
-    Checked through the loop on an instance that needs Phase I *and* has a cone: the
-    resulting start must be feasible in every block, cone included, or the first iterate
-    would fail Level 1.
-    """
-    from cosa.solver import initialization as init
-    from cosa.solver.instrumentation import level_1_violations
-
-    instance = families.basic(4, seed=0)
-    problem = instance.problem
-    elastic = init.elastic_problem(problem)
-    relaxed = cosa.solve(elastic.problem, start=elastic.start, phase_one=False, checker=CHECKED)
-    point = init.raise_free_heads(problem, elastic.original_point(relaxed.z), margin=1.0)
-    assert level_1_violations(problem, point) == ()
+    solution = cosa.solve(problem, checker=CHECKED, max_iterations=10)
+    assert level_1_violations(problem, solution.z) == ()
+    assert solution.z[0] >= 0.5 - 1e-9, "the floor route 2 could not satisfy is satisfied"
 
 
 # ----------------------------------------------------------------------------------

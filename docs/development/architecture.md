@@ -24,7 +24,7 @@ deliberate: it means each later issue has an unambiguous home, and the module na
 above are authoritative even before the files exist. Landed so far: `problem/socp.py`,
 `problem/portfolio.py`, `geometry/soc.py`, `geometry/tangent.py`,
 `geometry/step.py`, `active_set/working_set.py`, `active_set/updates.py`,
-`active_set/multipliers.py`, `linear_algebra/kkt.py`, `linear_algebra/rank.py`,
+`active_set/multipliers.py`, `linear_algebra/factorization.py`, `linear_algebra/kkt.py`, `linear_algebra/rank.py`,
 `linear_algebra/scaling.py`, `solver/apex.py`, `solver/cosa.py`,
 `solver/initialization.py`, `solver/instrumentation.py`, `solver/termination.py`,
 `experiments/reference.py`, `experiments/portfolio.py` and `experiments/randomized.py`.

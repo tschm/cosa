@@ -61,6 +61,7 @@ __all__ = [
     "LICENSED_BACKENDS",
     "OBJECTIVE_TOLERANCE",
     "OPEN_BACKENDS",
+    "PEER_BACKENDS",
     "CrossCheck",
     "CvxpySolver",
     "ReferenceSolution",
@@ -84,6 +85,28 @@ either, which makes it a fallback rather than a peer.
 
 LICENSED_BACKENDS: Final = ("MOSEK", "GUROBI")
 """The commercial solvers §12.1 names, reachable through the same adapter with a license."""
+
+PEER_BACKENDS: Final = ("CLARABEL", "ECOS")
+"""The backends accurate enough to be compared *against each other*.
+
+Not every available oracle is a peer, and the distinction is what
+:func:`cross_check` uses. An interior-point method converging to a duality gap around
+``1e-8`` can be held to §16.3's prescribed tolerance; SCS is a first-order method and
+cannot, so including it in an agreement check measures SCS rather than the instance.
+
+The figure that settled this was found by a property test rather than by a calibration
+sweep, which is why the sweep was not enough. :data:`BACKEND_ACCURACY` originally set SCS
+to ``1e-4`` on the evidence of 200 randomized instances whose worst gap was ``9.8e-6``.
+``test_any_seed_is_cross_checked_against_a_reference_solver`` then drew seed ``605467`` --
+a well-conditioned three-asset instance, nothing exotic -- where SCS and Clarabel differ by
+**0.9%**, a hundred times past that bound. Widening the tolerance to cover it would have
+made the cross-check vacuous; removing SCS from the peer set is the honest repair, and it
+is what this module's own description of SCS as "a fallback rather than a peer" already
+implied.
+
+SCS remains a perfectly good *oracle* when it is the only thing installed, which is what
+:func:`default_solver` uses it for. It is only unfit to be one side of an agreement.
+"""
 
 OBJECTIVE_TOLERANCE: Final = 1e-6
 """§16.3's "prescribed numerical tolerance" for objective agreement, relative."""
@@ -520,7 +543,8 @@ def cross_check(
         objective: the objective to check against, typically COSA's, or ``None`` to
             compare the reference solvers with each other.
         name: the instance's name, carried into the result so a failure identifies itself.
-        solvers: the oracles to use, or ``None`` for every available open backend. Passing
+        solvers: the oracles to use, or ``None`` for the available peers of
+            :data:`PEER_BACKENDS`, falling back to any available open backend. Passing
             a single solver with no ``objective`` produces a result with nothing to
             compare, which :attr:`CrossCheck.gap` reports honestly as zero.
         tolerance: the relative tolerance, §16.3's "prescribed numerical tolerance". It is
@@ -534,7 +558,12 @@ def cross_check(
         SolverUnavailableError: if no reference solver is available at all, or one of the
             named solvers cannot run.
     """
-    oracles = available_solvers() if solvers is None else solvers
+    # Peers first: an agreement between two interior-point solvers says something about the
+    # instance, and an agreement involving a first-order one says something about the
+    # first-order one. Fall back to whatever is available rather than refusing -- a single
+    # oracle still answers, it just has nothing to disagree with.
+    default = available_solvers(PEER_BACKENDS) or available_solvers()
+    oracles = default if solvers is None else solvers
     if not oracles:
         raise SolverUnavailableError(
             ", ".join(OPEN_BACKENDS),

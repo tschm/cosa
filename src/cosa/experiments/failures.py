@@ -19,12 +19,33 @@ what happens. :data:`MITIGATIONS` names the four that can be switched off throug
 guard and #23's Lagrangian curvature -- are not switchable and are covered by their own
 tests instead, which is recorded here rather than quietly omitted.
 
-**A failure is classified, not merely reported.** :class:`Outcome` distinguishes four
-things that a status string alone runs together: an answer that is optimal and certified, an
-answer that is optimal but whose certificate is loose, a *diagnosed* stop -- ``degenerate``,
-``stalled``, ``blocked-at-apex``, each of which names a specific thing that happened -- and
-an undiagnosed one, which is the iteration limit. Only the last is a failure in the sense
-§12.4 is worried about, and keeping them apart is most of what the study is for.
+**A failure is classified, not merely reported**, and the classification is not allowed to
+be self-certified. :class:`Outcome` distinguishes five things a status string runs together:
+
+* ``solved`` -- optimal, §6's residuals certify it, *and* the objective agrees with a
+  reference solver;
+* ``wrong`` -- optimal by COSA's own residuals and **disagreeing with the reference**. The
+  worst category, and the reason the reference check is here at all;
+* ``loose`` -- optimal by the loop, with residuals that do not quite certify it;
+* ``diagnosed`` -- ``degenerate``, ``stalled``, ``blocked-at-apex``: a stop that names a
+  specific thing that happened, each with an issue behind it;
+* ``undiagnosed`` -- the iteration limit, which names nothing.
+
+**Why the reference check is not optional.** The first version of this study trusted §6's
+residuals alone, and on one family that was wrong: ``badly scaled`` terminates with all five
+residuals between ``1e-12`` and ``1e-15`` at a point whose objective is 3.4% away from the
+reference's -- and the reference's point is feasible for COSA's own feasibility check, to
+``1e-11``, with a strictly better objective. A convex problem cannot have an exactly
+satisfied KKT system at a suboptimal point, and the residual there is not exactly zero: it is
+``1.9e-05`` absolute, reported as ``9.7e-12`` because §14.2 normalizes stationarity by
+``max(1, |c|_inf)`` and this instance's ``|c|_inf`` is ``2e6``.
+
+So the residual is genuinely small *in relative terms* and the answer is genuinely wrong, and
+both statements are true at once. That is a conditioning result rather than an arithmetic
+mistake, but a study that reports it as "solved" is reporting the certificate rather than the
+answer. Success Criterion 5 asks for agreement with a reference on every generated problem;
+this study is where that is checked per family, and the check is what turned a
+self-congratulatory verdict into a finding.
 """
 
 from __future__ import annotations
@@ -34,6 +55,13 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Final
 
 from cosa.experiments import portfolio as families
+from cosa.experiments.reference import (
+    OBJECTIVE_TOLERANCE,
+    ReferenceSolver,
+    SolverUnavailableError,
+    default_solver,
+    relative_gap,
+)
 from cosa.linear_algebra.scaling import equilibrate
 from cosa.problem.socp import ProblemError
 from cosa.solver import cosa as solver
@@ -43,6 +71,7 @@ from cosa.solver.termination import TOLERANCE
 
 if TYPE_CHECKING:
     from cosa.experiments.portfolio import PortfolioInstance
+    from cosa.problem.socp import SOCP
     from cosa.solver.cosa import Solution
 
 __all__ = [
@@ -57,6 +86,7 @@ __all__ = [
     "report",
     "study",
     "undiagnosed",
+    "wrong",
 ]
 
 FAMILIES: Final[Mapping[str, Callable[..., PortfolioInstance]]] = {
@@ -143,6 +173,9 @@ class Outcome:
         revisits: the most times any one working set was returned to. Above #29's threshold
             means the solve was cycling; one means it never backtracked.
         certified: whether the residuals put the answer inside §6's tolerance.
+        gap: the relative difference between COSA's objective and the reference solver's, or
+            ``None`` when no reference was available. ``None`` is *not* agreement, which is
+            why :attr:`verdict` reports it as ``unchecked`` rather than as ``solved``.
         supplied_start: whether the solver had to be handed a feasible point because it
             could not construct one. A property of the *formulation* -- a cone head that is
             not a free variable -- rather than of the solve, and separated from the verdict
@@ -162,29 +195,35 @@ class Outcome:
     factorizations: int
     revisits: int
     certified: bool
+    gap: float | None = None
     supplied_start: bool = False
     exhausted: bool = False
 
     @property
     def verdict(self) -> str:
-        """One of four words, which is the classification the study exists to make.
+        """One of five words, which is the classification the study exists to make.
 
-        ``"solved"`` for a certified optimum; ``"loose"`` for one the loop called optimal
-        whose residuals do not quite certify it, which is a tolerance question rather than a
-        failure; ``"diagnosed"`` for a stop that names what happened; ``"undiagnosed"`` for
-        the iteration limit, which names nothing and is the only real failure here.
+        The order of the tests matters. Disagreement with a reference outranks a clean
+        certificate, because a certificate that certifies the wrong answer is worse than no
+        certificate: it is the one failure mode a study of this kind cannot catch by looking
+        harder at its own numbers, and it is the mode ``badly scaled`` was in for two waves.
         """
-        if self.status == "optimal":
-            return "solved" if self.certified else "loose"
-        return "undiagnosed" if self.status == "iteration_limit" else "diagnosed"
+        if self.status != "optimal":
+            return "undiagnosed" if self.status == "iteration_limit" else "diagnosed"
+        if self.gap is None:
+            return "unchecked"
+        if self.gap > OBJECTIVE_TOLERANCE:
+            return "wrong"
+        return "solved" if self.certified else "loose"
 
     def __str__(self) -> str:
         """One table row."""
+        against = "  no reference" if self.gap is None else f"  gap {self.gap:8.1e}"
         note = "  (start supplied)" if self.supplied_start else ""
         note += "  (used the whole budget)" if self.exhausted else ""
         return (
             f"{self.family:22s} {self.verdict:11s} {self.status:16s} "
-            f"residual {self.residual:8.1e}  {self.iterations:5d} iters  "
+            f"residual {self.residual:8.1e}{against}  {self.iterations:5d} iters  "
             f"{self.factorizations:4d} fact  {self.revisits:3d} revisits{note}"
         )
 
@@ -267,11 +306,32 @@ def _run(instance: PortfolioInstance, policy: Policy = AS_SHIPPED) -> tuple[Solu
         )
 
 
+def _reference_gap(problem: SOCP, objective: float, oracle: ReferenceSolver | None) -> float | None:
+    """How far ``objective`` is from a reference solver's, relatively.
+
+    Args:
+        problem: the instance.
+        objective: COSA's objective there.
+        oracle: the reference solver, or ``None``.
+
+    Returns:
+        The relative gap, or ``None`` when no reference could answer -- which the verdict
+        reports as ``unchecked`` rather than silently as agreement.
+    """
+    if oracle is None:
+        return None
+    try:
+        return relative_gap(objective, oracle.solve(problem).objective)
+    except SolverUnavailableError:
+        return None
+
+
 def _outcome(
     name: str,
     solution: Solution,
     *,
     supplied: bool = False,
+    gap: float | None = None,
     limit: int = MAX_ITERATIONS,
     tolerance: float = TOLERANCE,
 ) -> Outcome:
@@ -281,6 +341,7 @@ def _outcome(
         name: the family's name.
         solution: what the solver returned.
         supplied: whether a feasible start had to be handed in.
+        gap: the relative objective gap against a reference solver, or ``None``.
         limit: the iteration budget the solve was given.
         tolerance: §6's tolerance for the certificate.
 
@@ -289,6 +350,7 @@ def _outcome(
     """
     return Outcome(
         family=name,
+        gap=gap,
         supplied_start=supplied,
         exhausted=solution.metrics.iterations >= limit,
         status=solution.status,
@@ -305,6 +367,7 @@ def study(
     *,
     seeds: Sequence[int] = (0, 1, 2),
     families: Mapping[str, Callable[..., PortfolioInstance]] = FAMILIES,
+    oracle: ReferenceSolver | bool | None = True,
 ) -> tuple[Outcome, ...]:
     """Solve every family at every seed and classify what happened.
 
@@ -324,16 +387,73 @@ def study(
             and so does a test that needs the study to be *cheap* rather than exhaustive.
             Note that ``large`` is what forces ``assets`` to twenty; a subset without it can
             use a much smaller instance.
+        oracle: the reference solver every answer is checked against. ``True`` picks one,
+            ``False`` skips the check, and a solver may be passed directly. Skipping it does
+            not produce a ``solved`` verdict -- it produces ``unchecked``, because "nothing
+            disagreed with me" and "a reference agreed with me" are different claims and
+            conflating them is what let a wrong answer read as solved for two waves.
 
     Returns:
         One outcome per family and seed, in family order.
     """
+    checker = _oracle(oracle)
     outcomes = []
     for name, build in families.items():
         for seed in seeds:
-            solution, supplied = _run(build(assets, seed=seed))
-            outcomes.append(_outcome(name, solution, supplied=supplied))
+            instance = build(assets, seed=seed)
+            solution, supplied = _run(instance)
+            outcomes.append(
+                _outcome(
+                    name,
+                    solution,
+                    supplied=supplied,
+                    gap=_reference_gap(instance.problem, solution.objective(instance.problem), checker),
+                )
+            )
     return tuple(outcomes)
+
+
+def _checked(
+    name: str,
+    instance: PortfolioInstance,
+    policy: Policy,
+    oracle: ReferenceSolver | None,
+) -> Outcome:
+    """Solve under one policy and classify the result against the reference.
+
+    Args:
+        name: the family's name.
+        instance: the instance.
+        policy: which mitigations to apply.
+        oracle: the reference solver, or ``None``.
+
+    Returns:
+        The outcome.
+    """
+    solution, supplied = _run(instance, policy)
+    problem = equilibrate(instance.problem).apply(instance.problem) if policy.scale else instance.problem
+    # The objective is compared in the *original* problem's terms whether or not the solve
+    # happened in a scaled one: `Scaling.apply` multiplies the objective by a positive
+    # factor, so a scaled objective is not comparable with an unscaled reference's.
+    objective = solution.objective(problem)
+    return _outcome(name, solution, supplied=supplied, gap=_reference_gap(problem, objective, oracle))
+
+
+def _oracle(oracle: ReferenceSolver | bool | None) -> ReferenceSolver | None:
+    """Resolve the ``oracle`` argument into a solver or ``None``.
+
+    Args:
+        oracle: ``True`` to pick one, ``False`` or ``None`` for none, or a solver.
+
+    Returns:
+        The solver, or ``None`` when the check is skipped or nothing is installed.
+    """
+    if oracle is True:
+        try:
+            return default_solver()
+        except SolverUnavailableError:
+            return None
+    return None if oracle is False else oracle
 
 
 def ablate(
@@ -341,6 +461,7 @@ def ablate(
     *,
     seed: int = 0,
     families: Mapping[str, Callable[..., PortfolioInstance]] = FAMILIES,
+    oracle: ReferenceSolver | bool | None = True,
 ) -> tuple[Ablation, ...]:
     """§12.4's fourth item: which mitigation addressed which failure, by removing it.
 
@@ -350,10 +471,14 @@ def ablate(
             controlled comparison and averaging it over seeds hides the instances where the
             mitigation is the difference between an answer and none.
         families: which families to ablate over, defaulting to all of them.
+        oracle: the reference solver both sides are checked against. Both sides, because a
+            mitigation that turns a ``wrong`` answer into a ``solved`` one is the strongest
+            thing an ablation can find and comparing two unchecked verdicts would miss it.
 
     Returns:
         One ablation per mitigation and family.
     """
+    checker = _oracle(oracle)
     results = []
     for mitigation, (on, off) in MITIGATIONS.items():
         for name, build in families.items():
@@ -362,8 +487,8 @@ def ablate(
                 Ablation(
                     mitigation=mitigation,
                     family=name,
-                    with_it=_outcome(name, _run(instance, on)[0]),
-                    without_it=_outcome(name, _run(instance, off)[0]),
+                    with_it=_checked(name, instance, on, checker),
+                    without_it=_checked(name, instance, off, checker),
                 )
             )
     return tuple(results)
@@ -374,6 +499,7 @@ def report(
     *,
     seeds: Sequence[int] = (0, 1, 2),
     families: Mapping[str, Callable[..., PortfolioInstance]] = FAMILIES,
+    oracle: ReferenceSolver | bool | None = True,
 ) -> str:
     """The whole study as text, for a document or a terminal.
 
@@ -381,21 +507,42 @@ def report(
         assets: how many assets each instance has.
         seeds: which seeds to draw for the per-family half.
         families: which families to study, defaulting to all of them.
+        oracle: the reference solver every answer is checked against.
 
     Returns:
         A report: every outcome, then every ablation that mattered, then the tally.
     """
-    outcomes = study(assets, seeds=seeds, families=families)
+    outcomes = study(assets, seeds=seeds, families=families, oracle=oracle)
     lines = [f"failure-mode study: {len(families)} families, {len(seeds)} seed(s), {assets} assets", ""]
     lines += [str(outcome) for outcome in outcomes]
     tally: dict[str, int] = {}
     for outcome in outcomes:
         tally[outcome.verdict] = tally.get(outcome.verdict, 0) + 1
-    lines += ["", "verdicts: " + ", ".join(f"{count} {verdict}" for verdict, count in sorted(tally.items())), ""]
+    lines += ["", "verdicts: " + ", ".join(f"{count} {verdict}" for verdict, count in sorted(tally.items()))]
+    disagreeing = wrong(outcomes)
+    if disagreeing:
+        lines += ["", "DISAGREES WITH THE REFERENCE (a certificate certifying the wrong answer):"]
+        lines += [f"  {outcome}" for outcome in disagreeing]
+    lines.append("")
     lines += ["ablations that mattered:"]
     mattered = [ablation for ablation in ablate(assets, seed=seeds[0], families=families) if ablation.mattered]
     lines += [str(ablation) for ablation in mattered] or ["  none"]
     return "\n".join(lines)
+
+
+def wrong(outcomes: Sequence[Outcome]) -> tuple[Outcome, ...]:
+    """The outcomes whose objective disagrees with the reference despite a clean certificate.
+
+    The category the study exists to surface. A ``diagnosed`` stop is honest and an
+    ``undiagnosed`` one is at least visible; this one looks like success.
+
+    Args:
+        outcomes: what :func:`study` returned.
+
+    Returns:
+        The disagreeing ones.
+    """
+    return tuple(outcome for outcome in outcomes if outcome.verdict == "wrong")
 
 
 def undiagnosed(outcomes: Sequence[Outcome]) -> tuple[Outcome, ...]:

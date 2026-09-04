@@ -124,10 +124,18 @@ The classical argument assumes a working set comparable in size to the problem; 
 active-set method on a portfolio runs with `m` well below `n`. Measured: 0.98× at `n = 300`,
 1.12× at `n = 500`.
 
-**Accuracy holds.** Every generated problem's objective agrees with CVXPY/Clarabel to within
-`1e-6`, across all four benchmark modes, and all thirteen instance families solve — including
-the ill-conditioned, the rank-deficient, the degenerate and the one whose constraint matrix
-spans fourteen orders of magnitude.
+**Accuracy holds on twelve of thirteen instance families** — including the ill-conditioned,
+the rank-deficient and the degenerate — and across all four benchmark modes, agreeing with
+CVXPY/Clarabel to within `1e-6`.
+
+**The thirteenth is the interesting one.** On an instance whose constraint matrix spans
+fourteen orders of magnitude, COSA terminates reporting `optimal` with all five conic KKT
+residuals under `1e-11`, at a point whose objective is 3.4% worse than the reference's — and
+the reference's point is feasible for COSA's own check to `1e-11`. The residual is not
+lying: it is `1.9e-5` absolute, and §14.2 divides it by `|c|` ≈ `2e6`. A *relative* KKT
+residual cannot certify an instance like that, and no amount of scaling fixes it. The study
+reports this as a distinct verdict — `wrong`, meaning certified and disagreeing — because a
+certificate that certifies the wrong answer is worse than no certificate.
 
 **Wall clock does not.** The reference solver is 3–30× faster on every mode measured, its
 modelling overhead included. That is reported rather than buried: the paper's stated goal is

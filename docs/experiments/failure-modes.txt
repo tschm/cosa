@@ -1,46 +1,51 @@
 failure-mode study: 13 families, 3 seed(s), 20 assets
 
-basic                  solved      optimal          residual  5.2e-11     90 iters     1 fact    1 revisits
-basic                  solved      optimal          residual  5.6e-11     78 iters     1 fact    1 revisits
-basic                  solved      optimal          residual  2.4e-10     85 iters     1 fact    1 revisits
-box                    solved      optimal          residual  8.0e-11     48 iters     1 fact    1 revisits
-box                    solved      optimal          residual  4.5e-10     67 iters     1 fact    1 revisits
-box                    solved      optimal          residual  5.1e-10     47 iters     1 fact    1 revisits
-sector                 solved      optimal          residual  5.2e-11     90 iters     1 fact    1 revisits
-sector                 solved      optimal          residual  1.8e-10     84 iters     1 fact    1 revisits
-sector                 solved      optimal          residual  2.4e-10     85 iters     1 fact    1 revisits
-factor exposure        solved      optimal          residual  1.6e-10    139 iters     1 fact    1 revisits
-factor exposure        solved      optimal          residual  5.6e-11     78 iters     1 fact    1 revisits
-factor exposure        solved      optimal          residual  1.0e-09     47 iters     1 fact    1 revisits
-turnover               solved      optimal          residual  1.7e-10    336 iters     2 fact    1 revisits
-turnover               solved      optimal          residual  2.1e-10    189 iters     2 fact    1 revisits
-turnover               solved      optimal          residual  2.6e-10    349 iters     2 fact    1 revisits
-large                  solved      optimal          residual  7.2e-11     33 iters     1 fact    1 revisits
-large                  solved      optimal          residual  7.1e-11     72 iters     1 fact    1 revisits
-large                  solved      optimal          residual  5.7e-11     74 iters     1 fact    1 revisits
-nearly redundant       solved      optimal          residual  8.5e-11     49 iters     1 fact    1 revisits
-nearly redundant       solved      optimal          residual  4.5e-10     67 iters     1 fact    1 revisits
-nearly redundant       solved      optimal          residual  5.1e-10     47 iters     1 fact    1 revisits
-highly correlated      solved      optimal          residual  8.9e-16     40 iters     1 fact    1 revisits
-highly correlated      solved      optimal          residual  1.4e-16     44 iters     1 fact    1 revisits
-highly correlated      solved      optimal          residual  1.7e-15     71 iters     1 fact    1 revisits
-ill conditioned        solved      optimal          residual  9.4e-11    174 iters     1 fact    1 revisits
-ill conditioned        solved      optimal          residual  5.5e-11    151 iters     1 fact    1 revisits
-ill conditioned        solved      optimal          residual  2.3e-10    152 iters     1 fact    1 revisits
-nearly active cone     solved      optimal          residual  5.2e-11     90 iters     1 fact    1 revisits
-nearly active cone     solved      optimal          residual  5.6e-11     78 iters     1 fact    1 revisits
-nearly active cone     solved      optimal          residual  2.4e-10     85 iters     1 fact    1 revisits
-degenerate optimum     solved      optimal          residual  2.2e-16      4 iters     1 fact    1 revisits
-degenerate optimum     solved      optimal          residual  2.2e-16      4 iters     1 fact    1 revisits
-degenerate optimum     solved      optimal          residual  2.2e-16      2 iters     1 fact    1 revisits
-many active bounds     solved      optimal          residual  1.1e-10     42 iters     1 fact    1 revisits
-many active bounds     solved      optimal          residual  1.2e-10     31 iters     1 fact    1 revisits
-many active bounds     solved      optimal          residual  2.5e-10     34 iters     1 fact    1 revisits
-badly scaled           solved      optimal          residual  9.7e-12   1000 iters     2 fact    1 revisits  (used the whole budget)
-badly scaled           solved      optimal          residual  1.4e-11   1000 iters     2 fact    1 revisits  (used the whole budget)
-badly scaled           solved      optimal          residual  9.0e-12   1000 iters     2 fact    1 revisits  (used the whole budget)
+basic                  solved      optimal          residual  5.2e-11  gap  9.8e-10     90 iters     1 fact    1 revisits
+basic                  solved      optimal          residual  5.6e-11  gap  4.1e-10     78 iters     1 fact    1 revisits
+basic                  solved      optimal          residual  2.4e-10  gap  2.2e-10     85 iters     1 fact    1 revisits
+box                    solved      optimal          residual  8.0e-11  gap  9.5e-11     48 iters     1 fact    1 revisits
+box                    solved      optimal          residual  4.5e-10  gap  1.6e-11     67 iters     1 fact    1 revisits
+box                    solved      optimal          residual  5.1e-10  gap  1.3e-11     47 iters     1 fact    1 revisits
+sector                 solved      optimal          residual  5.2e-11  gap  2.2e-10     90 iters     1 fact    1 revisits
+sector                 solved      optimal          residual  1.8e-10  gap  4.6e-10     84 iters     1 fact    1 revisits
+sector                 solved      optimal          residual  2.4e-10  gap  4.5e-10     85 iters     1 fact    1 revisits
+factor exposure        solved      optimal          residual  1.6e-10  gap  1.0e-09    139 iters     1 fact    1 revisits
+factor exposure        solved      optimal          residual  5.6e-11  gap  1.9e-10     78 iters     1 fact    1 revisits
+factor exposure        solved      optimal          residual  1.0e-09  gap  1.1e-10     47 iters     1 fact    1 revisits
+turnover               solved      optimal          residual  1.7e-10  gap  7.1e-11    336 iters     2 fact    1 revisits
+turnover               solved      optimal          residual  2.1e-10  gap  4.8e-10    189 iters     2 fact    1 revisits
+turnover               solved      optimal          residual  2.6e-10  gap  1.1e-10    349 iters     2 fact    1 revisits
+large                  solved      optimal          residual  7.2e-11  gap  1.1e-10     33 iters     1 fact    1 revisits
+large                  solved      optimal          residual  7.1e-11  gap  2.6e-11     72 iters     1 fact    1 revisits
+large                  solved      optimal          residual  5.7e-11  gap  6.6e-11     74 iters     1 fact    1 revisits
+nearly redundant       solved      optimal          residual  8.5e-11  gap  2.5e-10     49 iters     1 fact    1 revisits
+nearly redundant       solved      optimal          residual  4.5e-10  gap  5.2e-11     67 iters     1 fact    1 revisits
+nearly redundant       solved      optimal          residual  5.1e-10  gap  8.8e-13     47 iters     1 fact    1 revisits
+highly correlated      solved      optimal          residual  8.9e-16  gap  7.4e-10     40 iters     1 fact    1 revisits
+highly correlated      solved      optimal          residual  1.4e-16  gap  7.0e-10     44 iters     1 fact    1 revisits
+highly correlated      solved      optimal          residual  1.7e-15  gap  1.5e-09     71 iters     1 fact    1 revisits
+ill conditioned        solved      optimal          residual  9.4e-11  gap  1.0e-10    174 iters     1 fact    1 revisits
+ill conditioned        solved      optimal          residual  5.5e-11  gap  3.0e-11    151 iters     1 fact    1 revisits
+ill conditioned        solved      optimal          residual  2.3e-10  gap  5.2e-11    152 iters     1 fact    1 revisits
+nearly active cone     solved      optimal          residual  5.2e-11  gap  9.8e-10     90 iters     1 fact    1 revisits
+nearly active cone     solved      optimal          residual  5.6e-11  gap  4.1e-10     78 iters     1 fact    1 revisits
+nearly active cone     solved      optimal          residual  2.4e-10  gap  2.2e-10     85 iters     1 fact    1 revisits
+degenerate optimum     solved      optimal          residual  2.2e-16  gap  3.7e-10      4 iters     1 fact    1 revisits
+degenerate optimum     solved      optimal          residual  2.2e-16  gap  7.3e-11      4 iters     1 fact    1 revisits
+degenerate optimum     solved      optimal          residual  2.2e-16  gap  1.5e-10      2 iters     1 fact    1 revisits
+many active bounds     solved      optimal          residual  1.1e-10  gap  1.0e-09     42 iters     1 fact    1 revisits
+many active bounds     solved      optimal          residual  1.2e-10  gap  1.1e-09     31 iters     1 fact    1 revisits
+many active bounds     solved      optimal          residual  2.5e-10  gap  2.4e-11     34 iters     1 fact    1 revisits
+badly scaled           wrong       optimal          residual  9.7e-12  gap  3.4e-02   1000 iters     2 fact    1 revisits  (used the whole budget)
+badly scaled           wrong       optimal          residual  1.4e-11  gap  4.9e-02   1000 iters     2 fact    1 revisits  (used the whole budget)
+badly scaled           wrong       optimal          residual  9.0e-12  gap  3.6e-02   1000 iters     2 fact    1 revisits  (used the whole budget)
 
-verdicts: 39 solved
+verdicts: 36 solved, 3 wrong
+
+DISAGREES WITH THE REFERENCE (a certificate certifying the wrong answer):
+  badly scaled           wrong       optimal          residual  9.7e-12  gap  3.4e-02   1000 iters     2 fact    1 revisits  (used the whole budget)
+  badly scaled           wrong       optimal          residual  1.4e-11  gap  4.9e-02   1000 iters     2 fact    1 revisits  (used the whole budget)
+  badly scaled           wrong       optimal          residual  9.0e-12  gap  3.6e-02   1000 iters     2 fact    1 revisits  (used the whole budget)
 
 ablations that mattered:
   none

@@ -67,27 +67,82 @@ def test_almost_nothing_revisits_a_working_set(outcomes):
     assert all(outcome.verdict == "diagnosed" for outcome in revisiting)
 
 
-def test_everything_solves(outcomes):
-    """All thirty-nine, which is a stronger claim than this file used to make.
+def test_twelve_of_thirteen_families_solve(outcomes):
+    """Thirty-six of thirty-nine, and every failure is the same family.
 
-    `badly scaled` used to stall; the cause turned out to be `raise_free_heads` refusing any
-    cone head row whose coefficient was not exactly one, which made the retraction silently
-    unavailable. See `docs/development/failure-modes.md` — the interesting part is that the
-    first diagnosis was wrong and had an ablation apparently confirming it.
+    This assertion has been wrong twice, in opposite directions, which is worth knowing
+    before trusting it. It first said `badly scaled` stalls; then, after
+    `raise_free_heads` was fixed, that everything solves. Both were self-certified: the
+    study trusted §6's residuals and did not ask a reference solver. It should have —
+    `badly scaled` terminates with every residual under `1e-11` at a point 3.4% away from
+    the reference's, and the reference's point is feasible for COSA's own check to `1e-11`
+    with a strictly better objective.
     """
-    assert [outcome for outcome in outcomes if outcome.verdict != "solved"] == []
+    unsolved = [outcome for outcome in outcomes if outcome.verdict != "solved"]
+    assert {outcome.family for outcome in unsolved} == {"badly scaled"}
+    assert len(unsolved) == 3, "all three seeds"
 
 
-def test_a_solved_verdict_means_the_residuals_agree(outcomes):
-    """`solved` is a certificate, not a status string.
+def test_the_one_failure_is_a_wrong_answer_with_a_clean_certificate(outcomes):
+    """The category this study exists to surface, and the worst one there is.
 
-    §6's five residuals are what say so, which is the distinction between `solved` and
-    `loose` — a loop that called a point optimal on a criterion the residuals do not confirm.
+    A `diagnosed` stop is honest and an `undiagnosed` one is at least visible. This looks
+    like success: the loop reports `optimal`, all five of §6's residuals are inside their
+    tolerance, and the answer is wrong. Only the reference check catches it.
+    """
+    disagreeing = failures.wrong(outcomes)
+    assert len(disagreeing) == 3
+    for outcome in disagreeing:
+        assert outcome.status == "optimal", "the loop is satisfied"
+        assert outcome.certified, "and so are the residuals"
+        assert outcome.gap is not None
+        assert outcome.gap > 1e-3, "and the answer is wrong anyway"
+
+
+def test_the_residual_is_small_and_the_answer_is_wrong_at_the_same_time():
+    """Both statements are true, which is the whole difficulty.
+
+    A convex problem cannot have an exactly satisfied KKT system at a suboptimal point, and
+    the residual here is not exactly zero: it is around `2e-5` absolute, reported as `1e-11`
+    because §14.2 normalizes stationarity by `max(1, |c|_inf)` and this instance's `|c|_inf`
+    is `2e6`. So the residual is genuinely small in relative terms and the answer is
+    genuinely wrong — a conditioning result rather than an arithmetic mistake, and one that a
+    relative certificate cannot express.
+    """
+    import numpy as np
+
+    from cosa.experiments import portfolio as generators
+    from cosa.solver import cosa as solver
+
+    instance = generators.badly_scaled(20, seed=0)
+    answer = solver.solve(instance.problem)
+    absolute = float(np.abs(answer.multipliers.stationarity_residual(instance.problem)).max())
+    assert answer.residuals.stationarity < 1e-9, "relatively negligible"
+    assert absolute > 1e-6, "and absolutely not"
+    assert float(np.abs(instance.problem.c).max()) > 1e5, "which is what the normalizer divides by"
+
+
+def test_a_solved_verdict_needs_a_reference_and_not_only_a_certificate(outcomes):
+    """`solved` is three claims at once, and the third is the one that was missing.
+
+    The loop must report optimal, §6's residuals must confirm it, *and* a reference solver
+    must agree about the objective. "Nothing disagreed with me" and "a reference agreed with
+    me" are different claims, and conflating them is what let a wrong answer read as solved.
     """
     for outcome in outcomes:
         if outcome.verdict == "solved":
             assert outcome.status == "optimal"
             assert outcome.certified
+            assert outcome.gap is not None
+            assert outcome.gap <= 1e-6
+
+
+def test_without_a_reference_the_verdict_is_unchecked_rather_than_solved():
+    """Skipping the check must not look like passing it."""
+    subset = {name: failures.FAMILIES[name] for name in ("basic", "box")}
+    blind = failures.study(20, seeds=(0,), families=subset, oracle=False)
+    assert {outcome.verdict for outcome in blind} == {"unchecked"}
+    assert all(outcome.gap is None for outcome in blind)
 
 
 # ----------------------------------------------------------------------------------
@@ -141,26 +196,25 @@ def test_the_degenerate_optimum_solves_almost_immediately(outcomes):
 # ----------------------------------------------------------------------------------
 
 
-def test_badly_scaled_converges_and_spends_the_whole_budget(outcomes):
-    """The honest remaining caveat: it converges, to eleven digits, and slowly.
+def test_badly_scaled_spends_the_whole_budget_and_still_gets_it_wrong(outcomes):
+    """Fourteen orders of magnitude in the constraint matrix, and the honest verdict.
 
-    Fourteen orders of magnitude in the constraint matrix is not a conditioning failure for
-    this formulation — the KKT system does not inherit it, because the tangent puts `L` in as
-    a single row. What it costs is iterations.
+    Earlier versions of this test asserted, in turn, that the family stalls and that it
+    solves. It does neither: it terminates claiming optimality, having used its entire
+    iteration budget, at a point the reference beats by several percent.
     """
     scaled = [outcome for outcome in outcomes if outcome.family == "badly scaled"]
-    assert all(outcome.verdict == "solved" for outcome in scaled)
-    assert all(outcome.residual < 1e-9 for outcome in scaled)
+    assert all(outcome.verdict == "wrong" for outcome in scaled)
     assert all(outcome.exhausted for outcome in scaled)
 
 
 def test_no_mitigation_changes_an_outcome(ablations):
-    """§12.4's fourth item, answered in the negative — which is the stronger answer.
+    """§12.4's fourth item, answered in the negative — including for the family that fails.
 
-    Everything solves without help. The counterfactual is still the only form of the claim
-    that can be wrong, and it is still worth running: it is what caught the earlier version
-    of this file asserting that equilibration rescued `badly scaled`, on evidence that was
-    sound and a conclusion that was not.
+    Nothing rescues `badly scaled`. In particular §13.3's equilibration does not, which is
+    the second time that question has been answered: it appeared to rescue the family when
+    the family was stalling, and once the stall was traced to `raise_free_heads` the family
+    ran to completion — with the wrong answer, equilibrated or not.
     """
     for ablation in ablations:
         assert ablation.with_it.verdict == ablation.without_it.verdict, ablation.mitigation
@@ -233,7 +287,7 @@ def test_an_outcome_renders_its_own_row(outcomes):
 def test_an_ablation_renders_its_own_row(ablations):
     """Without and with, in that order, because the reader is asking what it bought."""
     rendered = str(next(a for a in ablations if "equilibration" in a.mitigation and a.family == "badly scaled"))
-    assert "solved -> solved" in rendered
+    assert "wrong -> wrong" in rendered
     assert "iters" in rendered
 
 
@@ -253,7 +307,7 @@ def test_the_report_says_that_nothing_mattered():
 # ----------------------------------------------------------------------------------
 
 
-def _outcome(status, *, certified=True, iterations=10):
+def _outcome(status, *, certified=True, iterations=10, gap=0.0):
     """An outcome with a given status, for testing the classification directly."""
     return failures.Outcome(
         family="synthetic",
@@ -263,23 +317,35 @@ def _outcome(status, *, certified=True, iterations=10):
         factorizations=1,
         revisits=1,
         certified=certified,
+        gap=gap,
     )
 
 
-def test_the_four_verdicts_are_distinguished():
-    """Constructed rather than found, because the study no longer produces three of them.
+def test_the_five_verdicts_are_distinguished():
+    """Constructed rather than found, because the study does not produce most of them.
 
-    That is a good problem to have and a bad reason to stop testing the classification: the
-    distinction between a stop that names what happened and one that does not is the study's
-    central instrument, and an instrument that is only exercised when something is broken is
-    not one you can trust when something breaks.
+    That is a good problem to have and a bad reason to stop testing the classification: it
+    is the study's central instrument, and an instrument only exercised when something is
+    broken is not one you can trust when something breaks.
     """
     assert _outcome("optimal").verdict == "solved"
+    assert _outcome("optimal", gap=1.0).verdict == "wrong"
+    assert _outcome("optimal", gap=None).verdict == "unchecked"
     assert _outcome("optimal", certified=False).verdict == "loose"
     assert _outcome("stalled").verdict == "diagnosed"
     assert _outcome("degenerate").verdict == "diagnosed"
     assert _outcome("blocked-at-apex").verdict == "diagnosed"
     assert _outcome("iteration_limit").verdict == "undiagnosed"
+
+
+def test_a_wrong_answer_outranks_a_clean_certificate():
+    """The order of the tests in `verdict`, asserted rather than left to reading order.
+
+    An outcome that is certified *and* disagrees with the reference is `wrong`, not `solved`.
+    Getting that precedence backwards is exactly the bug this classification was extended to
+    catch.
+    """
+    assert _outcome("optimal", certified=True, gap=1.0).verdict == "wrong"
 
 
 def test_only_the_iteration_limit_counts_as_undiagnosed():
@@ -316,3 +382,60 @@ def test_a_mitigation_can_matter_by_cost_alone():
     assert cheap.mattered, "the weak form: same verdict, ten times the work"
     assert changed.mattered, "the strong form: the verdict itself moved"
     assert not neither.mattered
+
+
+# ----------------------------------------------------------------------------------
+# The oracle argument, and what happens when there is not one
+# ----------------------------------------------------------------------------------
+
+
+class _Unavailable:
+    """A reference solver that is installed and never works.
+
+    An unlicensed commercial backend behaves exactly like this: importable, and failing on
+    every solve. The study must report `unchecked` rather than crash or claim agreement.
+    """
+
+    name = "unavailable"
+    accuracy = 1e-9
+
+    def is_available(self) -> bool:
+        """It claims to be."""
+        return True
+
+    def solve(self, problem):
+        """And then is not."""
+        from cosa.experiments.reference import SolverUnavailableError
+
+        raise SolverUnavailableError(self.name, "no license")
+
+
+def test_a_broken_oracle_leaves_the_verdict_unchecked():
+    """Not `solved`, and not a crash. Failing to verify is not the same as verifying."""
+    subset = {name: failures.FAMILIES[name] for name in ("basic",)}
+    blind = failures.study(20, seeds=(0,), families=subset, oracle=_Unavailable())
+    assert [outcome.verdict for outcome in blind] == ["unchecked"]
+    assert "no reference" in str(blind[0])
+
+
+def test_no_oracle_installed_leaves_the_verdict_unchecked(monkeypatch):
+    """A machine without the `reference` extra must still be able to run the study."""
+    from cosa.experiments.reference import SolverUnavailableError
+
+    def missing(*_args, **_kwargs):
+        """Stand in for `default_solver` where nothing is installed."""
+        raise SolverUnavailableError("none", "not installed")
+
+    monkeypatch.setattr(failures, "default_solver", missing)
+    subset = {name: failures.FAMILIES[name] for name in ("basic",)}
+    blind = failures.study(20, seeds=(0,), families=subset, oracle=True)
+    assert [outcome.verdict for outcome in blind] == ["unchecked"]
+
+
+def test_an_oracle_can_be_passed_in_directly():
+    """So a caller with a licensed backend can use it, and a test can use a stub."""
+    from cosa.experiments.reference import default_solver
+
+    subset = {name: failures.FAMILIES[name] for name in ("basic",)}
+    checked = failures.study(20, seeds=(0,), families=subset, oracle=default_solver())
+    assert [outcome.verdict for outcome in checked] == ["solved"]

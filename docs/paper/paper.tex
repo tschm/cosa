@@ -1221,6 +1221,16 @@ different.
     change between neighbouring problems.
 \end{enumerate}
 
+\paragraph{One assumption that \emph{is} required, and was not stated.}
+The residual criterion of Section~6 certifies global optimality only
+where the instance is well enough scaled that a \emph{relative}
+residual bounds the objective error. Section~15.6 exhibits an instance
+where it does not: all five residuals inside $10^{-11}$ at a point
+$3.4\%$ from the optimum, because the normalization divides by
+$\|c\|_\infty\approx2\times10^{6}$ and the conditioning amplifies what
+is left. Stating this is Deliverable~1's job and it is the one
+assumption the plan did not anticipate needing.
+
 \paragraph{One assumption that is not required.} No assumption is made
 about the conditioning of $\Sigma$. The tangent representation enters
 the KKT system as a \emph{single row}, and a single row has no
@@ -1331,34 +1341,48 @@ byte-reproducible and say so.
 
 \subsection{Accuracy}
 
-Success Criterion~5 holds. Across all four benchmark modes of
-Section~12 and both draws, every generated problem's objective agrees
-with the reference solver to within $10^{-6}$ relative --- 18 of 18
-comparisons, with observed gaps between $10^{-11}$ and $10^{-9}$. The
-five conic KKT residuals of Section~6 at termination lie between
-$10^{-10}$ and $10^{-9}$, an order of magnitude tighter than the
-stopping tolerance.
+Across all four benchmark modes of Section~12 and both draws, every
+generated problem's objective agrees with the reference solver to
+within $10^{-6}$ relative --- 18 of 18 comparisons, with observed gaps
+between $10^{-11}$ and $10^{-9}$. The five conic KKT residuals of
+Section~6 at termination lie between $10^{-10}$ and $10^{-9}$.
+
+Success Criterion~5 asks for that agreement on \emph{every} generated
+problem, and across the wider set of instance families it does not
+hold. Twelve of thirteen families agree to $10^{-9}$ or better; the
+thirteenth does not, and Section~15.6 is that result. It is the
+paper's most important negative finding and it is a statement about
+the stopping criterion rather than about the arithmetic.
 
 \subsection{Robustness}
 
-Thirteen instance families, three seeds each, twenty assets: all
-thirty-nine solve, with residuals certified by Section~6's criterion.
-Outcomes are classified into four rather than reported as a status
-string, because a stop that names what happened and one that does not
-are different results:
+Thirteen instance families, three seeds each, twenty assets:
+thirty-six solve and three do not. Outcomes are classified into five
+rather than reported as a status string, and the classification is not
+permitted to be self-certified --- a verdict of \emph{solved} requires
+that the loop report optimality, that Section~6's residuals confirm
+it, \emph{and} that a reference solver agree about the objective:
 
 \begin{center}
 \begin{tabular}{lr}
 \hline
 verdict & count\\
 \hline
-solved (optimal, and the residuals certify it) & 39\\
+solved (optimal, certified, and the reference agrees) & 36\\
+\textbf{wrong} (optimal and certified, disagreeing with the reference)
+& \textbf{3}\\
 loose (optimal, residuals do not quite agree) & 0\\
+unchecked (no reference was available) & 0\\
 diagnosed (stopped, and named what happened) & 0\\
 undiagnosed (the iteration limit, which names nothing) & 0\\
 \hline
 \end{tabular}
 \end{center}
+
+The \emph{wrong} category is the one worth having and it did not exist
+until the study stopped certifying itself. A diagnosed stop is honest
+and an undiagnosed one is at least visible; a wrong answer looks like
+success.
 
 Notable individual results. The factor-model families, whose optima
 lie at the apex, are consistently \emph{faster} than the basic family
@@ -1378,17 +1402,59 @@ by a different route; and Section~13.3's Ruiz equilibration costs
 between 30\% and 80\% more iterations on every family and rescues
 none.
 
-That last result reversed an earlier one, and how it reversed is
-worth recording. One family --- a deliberately badly scaled instance
---- did stall, and equilibration did convert the stall into an
-optimum. The diagnosis was wrong. The routine that repairs conic
-feasibility by setting $t=\|Lx\|_2$ required the cone's head row to
-select its variable with a coefficient of exactly one; no rescaled
-instance satisfies that, so the retraction was silently unavailable
-and an iterate on the cone's boundary could not move. Equilibration
-was perturbing the head row's coefficient, not the conditioning. With
-the restriction removed the family solves to $10^{-11}$ unaided, and
-equilibrating it makes the residual five orders of magnitude worse.
+\subsection{A Certificate That Certifies the Wrong Answer}
+
+One family fails, and it fails in the most instructive way available.
+
+The instance is deliberately badly scaled: $\|A\|_\infty\approx10^{-4}$
+while $\|G\|_\infty$ and $\|c\|_\infty$ are around $10^{6}$. COSA
+terminates on it reporting \emph{optimal}, with all five of
+Section~6's residuals between $10^{-11}$ and $10^{-15}$, at the point
+whose objective is $-0.00524$. The reference solver returns $-0.03956$
+--- and that point is feasible for COSA's \emph{own} feasibility test
+to $10^{-11}$, with a strictly better objective. The direction between
+the two is a feasible descent direction with derivative $-0.0343$. No
+tolerance argument survives that: a better feasible point
+demonstrably exists.
+
+The residual is not lying. The stationarity residual there is
+$1.93\times10^{-5}$ in absolute terms; Section~14.2 reports it
+relative to the objective's scale, dividing by
+$\max(1,\|c\|_\infty)=2\times10^{6}$, which prints $9.7\times10^{-12}$.
+A convex problem cannot have an exactly satisfied KKT system at a
+suboptimal point and this one does not --- the residual is real, and
+it is simply small enough relative to data of size $10^{6}$ that a
+\emph{relative} certificate cannot distinguish it from zero, while the
+conditioning amplifies it into a 3.4\% objective error.
+
+\textbf{The certificate is relatively satisfied and the answer is
+wrong, and neither of those is a mistake in the other.} That is the
+finding. It says that the residual criterion of Section~6, which
+Success Criterion~2 asks to be "mathematically meaningful", is
+meaningful and not \emph{sufficient}: on an instance whose data spans
+fourteen orders of magnitude a relative KKT residual admits an
+answer that is percent-wrong. An absolute floor, or a normalization
+that does not divide by $\|c\|_\infty$, is what the criterion is
+missing, and stating that is Deliverable~1's business rather than a
+defect to be patched quietly.
+
+Two things this is \emph{not}. It is not a scaling problem:
+equilibrated, the same instance lands at $-0.00540$ against the same
+reference, a gap indistinguishable from the unscaled solve's. Scaling
+changes the appearance of the residual and never the answer. And it is
+not the earlier diagnosis, which was that the family stalls --- it
+does now run to completion, because the routine that repairs conic
+feasibility by setting $t=\|Lx\|_2$ had required the cone's head row to
+select its variable with a coefficient of exactly one, which no
+rescaled instance satisfies, so the retraction was silently
+unavailable and a boundary iterate could not move at all.
+
+That earlier diagnosis had a clean before-and-after table supporting
+it: the family stalled, equilibration produced an apparent optimum,
+and the conclusion drawn was conditioning. The ablation was sound and
+what it measured was a coincidence. \textbf{A diagnosed failure is a
+hypothesis}, and a study that certifies itself will confirm whichever
+hypothesis it started with.
 
 \subsection{Warm starts}
 
@@ -1530,6 +1596,19 @@ may produce unstable KKT systems.
 
 This will be addressed through scaling, rank detection,
 regularization, and robust factorizations.
+
+\emph{Partly answered, and the residue is not where it was expected.}
+The KKT system does not inherit $\kappa(\Sigma)$, because the tangent
+representation enters it as a single row and a single row has no
+spectrum --- so the obvious instability route is closed. Rank
+deficiency is likewise not a difficulty. Scaling turns out to rescue
+no family and to cost 30--80\% more iterations on every one.
+
+What is left is Section~15.6: on a badly scaled instance the
+\emph{stopping criterion} rather than the linear algebra is what
+fails, certifying an answer that is percent-wrong. Robust
+factorizations do not help with that and neither does equilibration.
+It is a criterion problem.
 
 \subsection{Risk 4: Poor Generic Performance}
 

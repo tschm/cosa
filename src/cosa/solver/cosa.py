@@ -159,6 +159,7 @@ from cosa.solver.apex import apex_direction
 from cosa.solver.initialization import NeedsPhaseOneError, elastic_problem, feasible_start, raise_free_heads
 from cosa.solver.instrumentation import UNCHECKED, InvariantChecker, Metrics, Recorder
 from cosa.solver.termination import Residuals, residuals
+from cosa.solver.warm import WarmStart, seed
 
 if TYPE_CHECKING:
     from cosa import Vector
@@ -307,6 +308,7 @@ def solve(
     phase_one: bool = True,
     regularization: float = REGULARIZATION,
     reuse: Reuse | bool | None = True,
+    warm: WarmStart | None = None,
 ) -> Solution:
     """Run the §4.1 iteration until it terminates.
 
@@ -330,6 +332,10 @@ def solve(
         phase_one: whether to build and solve an elastic Phase I when no feasible start can
             be constructed cheaply. Set ``False`` by the recursive call, which is what
             stops the recursion at depth one.
+        warm: §9 Phase VI's warm start -- a previous solution, working set, multipliers and
+            factorization cache, any part of which may be discarded if it does not fit. See
+            :mod:`cosa.solver.warm`. Explicit arguments win over it: a caller who passes both
+            ``start`` and ``warm`` means the ``start``.
         reuse: #27's factorization cache. ``True`` builds a fresh one, ``False`` restores
             §13.1's refactorize-every-iteration reference policy, and a
             :class:`cosa.linear_algebra.reuse.Reuse` carried in from a previous solve is
@@ -348,27 +354,42 @@ def solve(
     stopping = residuals_tolerance(tolerance)
     activation = updates.ACTIVATION_TOLERANCE
     recorder = recorder or Recorder()
-    cache = Reuse() if reuse is True else (None if reuse is False else reuse)
+    hint, believed, carried, kept = seed(problem, warm)
+    cache = (
+        kept
+        if reuse is True and kept is not None
+        else (Reuse() if reuse is True else (None if reuse is False else reuse))
+    )
     guard = Guard()
 
-    try:
+    # A caller's `start` is honoured strictly and a warm start's point is a hint. Getting
+    # that backwards either way is a bug: silently replacing a supplied start hides the
+    # caller's mistake, and refusing to solve because last problem's solution is infeasible
+    # for this one makes warm starting useless exactly where a sequence gets interesting.
+    if start is not None:
         point = feasible_start(problem, start)
-    except NeedsPhaseOneError:
-        # Only the *constructed* routes fall through to Phase I. A start the caller supplied
-        # and got wrong is a caller error and propagates: silently discarding it and solving
-        # from somewhere else would hide the mistake and, for a warm start, would hide that
-        # the warm start was not being used.
-        if start is not None or not phase_one:
-            raise
-        point = _phase_one(problem, rho=rho, max_iterations=max_iterations, recorder=recorder)
+    else:
+        point = _entered_from(problem, hint)
+        if point is None:
+            believed = None
+            try:
+                point = feasible_start(problem, None)
+            except NeedsPhaseOneError:
+                if not phase_one:
+                    raise
+                point = _phase_one(problem, rho=rho, max_iterations=max_iterations, recorder=recorder)
 
     checker.accepted_iterate(problem, point)
-    working_set = _working_set_at(problem, point)
+    # §9 Phase VI's second item. A believed working set is used only when the start it came
+    # with was actually taken: applying last problem's active set to a point constructed from
+    # scratch would assert an activity the geometry there has not been asked about.
+    took_the_hint = believed is not None and start is hint and hint is not None and np.array_equal(point, hint)
+    working_set = believed if took_the_hint else _working_set_at(problem, point)
     # The Lagrangian curvature needs multipliers the direction has not produced yet, so the
     # first pass uses zero -- which is `H = rho*I`, the subproblem Waves 4-6 solved. From
     # then on each direction is built on the last one's duals: a fixed-point iteration, and
     # the cheapest honest reading of "primal-dual".
-    previous = _no_multipliers(problem)
+    previous = carried
 
     with recorder.solving():
         for _ in range(max_iterations):
@@ -778,12 +799,37 @@ def _finish(
     )
 
 
+def _entered_from(problem: SOCP, hint: Vector | None) -> Vector | None:
+    """The warm start's point, if it is feasible for this problem.
+
+    A hint rather than an instruction, so an unusable one is discarded quietly rather than
+    raised. The next problem in a sequence may have moved its feasible set out from under
+    the last one's solution -- a tightened bound is enough -- and that is an ordinary thing
+    for a frontier to do, not an error to report.
+
+    Args:
+        problem: the instance.
+        hint: the previous solution, or ``None``.
+
+    Returns:
+        The point when it is feasible here, ``None`` otherwise.
+    """
+    if hint is None:
+        return None
+    try:
+        return feasible_start(problem, hint)
+    except (NeedsPhaseOneError, ProblemError):
+        return None
+
+
 def _no_multipliers(problem: SOCP) -> Multipliers:
     """Zero multipliers, the starting point of the curvature's fixed-point iteration.
 
     Zero rather than a guess: it makes the first direction subproblem exactly ``H = rho*I``,
-    so the first step of a #23 solve is bit-for-bit the first step of a Wave 6 solve and any
-    difference between them is attributable to the curvature rather than to initialization.
+    so the first step of a cold #23 solve is bit-for-bit the first step of a Wave 6 solve and
+    any difference between them is attributable to the curvature rather than to
+    initialization. A *warm* solve deliberately does not start here -- #30 carries the last
+    problem's multipliers in, so its first direction already has the right Hessian.
 
     Args:
         problem: the instance, for its shape.
@@ -791,11 +837,7 @@ def _no_multipliers(problem: SOCP) -> Multipliers:
     Returns:
         Multipliers of the right shape, all zero.
     """
-    return Multipliers(
-        y=np.zeros(problem.num_inequalities),
-        nu=np.zeros(problem.num_equalities),
-        w=np.zeros(problem.cone.dim),
-    )
+    return seed(problem, None)[2]
 
 
 def _revise(

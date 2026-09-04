@@ -150,6 +150,9 @@ they always do.
   agree about.
 - [Failure modes](docs/development/failure-modes.md) — what COSA does on the hard instances,
   and which mitigation is why.
+- [How the bugs were actually found](docs/development/how-the-bugs-were-found.md) — the
+  mechanisms rather than the bugs, and why the ones that compared against something external
+  found everything the ones that asked the code about itself did not.
 - [The plan](docs/paper/paper.tex) — the project's own specification, which every module
   docstring cites by section.
 

@@ -392,7 +392,50 @@ The initial implementation may use
 H=\rho I,
 \qquad \rho>0,
 \]
-to obtain a well-defined direction.
+to obtain a well-defined direction. This is not, however, the right
+$H$, and the difference is the difference between a first-order and a
+second-order method.
+
+The objective is linear, so $\nabla^2f=0$ and it is tempting to
+conclude that the Lagrangian has no curvature either. It does: the
+\emph{cone} is curved. Writing an active factor as the scalar
+constraint
+\[
+g(z)=\|s_1\|_2-s_0\leq0,
+\qquad
+s=G_jz+h_j,
+\]
+the Hessian of the Lagrangian is
+\begin{equation}
+H
+=
+\rho I
++
+\sum_j\mu_j\,G_j^\top
+\begin{bmatrix}
+0&0\\
+0&\dfrac{I-u u^\top}{\|s_1\|_2}
+\end{bmatrix}
+G_j,
+\tag{4b}
+\end{equation}
+where $\mu_j$ is the conic multiplier of factor $j$ --- concretely,
+the head of $w_j$, since $w_j=\mu_j(1,-u)$ at a tangent factor.
+
+Two properties make this free to use. The curvature block is positive
+semidefinite, because $g$ is convex, so the direction problem stays
+strictly convex and uniquely solvable; and it is singular along $u$,
+because moving radially changes $\|s_1\|_2$ at a constant rate. It is
+also unbounded as $\|s_1\|_2\to0$, which is the apex announcing itself
+from a distance rather than only at the point where the tangent fails.
+
+This is what makes the direction computation \emph{primal--dual} in
+the sense of Phase IV: not that duals are computed alongside primals,
+which any active-set method does, but that the dual variable
+determines the primal step. The multipliers used are those of the
+previous iterate, which makes the scheme a fixed-point iteration
+rather than an implicit system; starting from zero reproduces
+$H=\rho I$ exactly at the first step.
 
 \subsection{KKT System}
 
@@ -456,7 +499,7 @@ t+\alpha\tau.
 
 Provided the right-hand side is nonnegative, squaring gives
 \begin{equation}
-\|q\|_2^2\alpha^2
+\bigl(\|q\|_2^2-\tau^2\bigr)\alpha^2
 +
 2(r^\top q-t\tau)\alpha
 +
@@ -467,6 +510,32 @@ Provided the right-hand side is nonnegative, squaring gives
 
 Thus the SOC feasibility condition reduces to a scalar quadratic
 inequality.
+
+The leading coefficient is the \emph{Lorentz form} of the direction,
+$\|q\|_2^2-\tau^2$, and not $\|q\|_2^2$. An earlier draft of this
+document printed the latter. The two agree only when $\tau=0$, which
+is the one case eq.~(7) never takes: the objective charges $\lambda$
+per unit of $t$, so every improving direction moves $\tau$.
+
+The correction is not cosmetic. Along a direction running down the
+cone's boundary towards the apex the printed form admits a step of
+zero where the true maximum step is $t/(-\tau)$, so a solver using it
+refuses to travel along the boundary at all. The correction also turns
+the root selection from one case into three, because the leading
+coefficient may now vanish or be negative:
+
+\begin{itemize}
+    \item $\|q\|_2^2>\tau^2$: an upward parabola, and the step is
+    bounded by its upper root;
+    \item $\|q\|_2^2=\tau^2$: the quadratic degenerates to a linear
+    inequality;
+    \item $\|q\|_2^2<\tau^2$: a downward parabola, and the feasible
+    set is an interval or a half-line, selected by the sign at its
+    midpoint.
+\end{itemize}
+
+A further cap at $t/(-\tau)$ is required when $\tau<0$, since squaring
+is only valid while the right-hand side is nonnegative.
 
 \subsection{Maximum Feasible Step}
 
@@ -1038,8 +1107,138 @@ Because the problem is convex, satisfaction of the KKT conditions
 provides a certificate of global optimality under the usual
 constraint qualification assumptions.
 
-The final paper should state the precise assumptions required by the
-algorithm and distinguish the generic case from degenerate cases.
+\subsection{Assumptions and Constraint Qualifications}
+
+This is Deliverable~1, and it is stated here rather than deferred.
+Throughout, $z=(x,t)$ and the instance is eq.~(7).
+
+\paragraph{Standing assumptions.} These are required for the problem
+to be well posed and are checked at construction.
+
+\begin{enumerate}
+    \item $\Sigma\succeq0$. Positive \emph{semi}definiteness suffices:
+    $L$ is obtained by eigendecomposition and a rank-deficient
+    $\Sigma$ simply yields a shorter $L$, which makes the cone smaller
+    rather than worse conditioned. Rank deficiency is not a degenerate
+    case here and is not treated as one.
+
+    \item $\lambda>0$. This is what makes the reduction from eq.~(1)
+    to eq.~(2) exact: it is what pushes $t$ down onto $t=\|Lx\|_2$, so
+    the two problems have the same solution set in $x$. At $\lambda=0$
+    the reduction fails and the problem is a linear program.
+
+    \item The feasible set is nonempty. Detected rather than assumed:
+    an elastic Phase~I minimizes a uniform relaxation of the
+    inequalities and reports infeasibility when its optimal relaxation
+    is positive.
+
+    \item The objective is bounded below on the feasible set. Also
+    detected rather than assumed: an unbounded ray is reported as such
+    by the ratio test finding no blocking constraint.
+\end{enumerate}
+
+\paragraph{Constraint qualification.} The KKT conditions of
+Section~6 are necessary at a minimizer under a constraint
+qualification, and for this problem the relevant one is Slater's:
+
+\begin{quote}
+There exists a strictly feasible $z$ --- one with $Az<b$, $Ez=d$ and
+$\|Lx\|_2<t$.
+\end{quote}
+
+Slater's condition holds for every instance in which the linear
+constraints admit a relative interior point, because the conic
+constraint can always be made strict by \emph{raising} $t$: the
+variable $t$ appears in exactly two places in eq.~(7), the cone's head
+row and the objective, so increasing it violates nothing. This is a
+property of the mean--standard-deviation formulation and not of SOCPs
+in general; a formulation in which $t$ carried an upper bound would
+need Slater's condition assumed rather than derived.
+
+Because the problem is convex and Slater's condition holds,
+satisfaction of the conic KKT conditions is a certificate of
+\emph{global} optimality, not merely of stationarity.
+
+\paragraph{The generic case.} Generically, at a minimizer:
+
+\begin{enumerate}
+    \item the active linear rows together with $E$ have full row rank
+    (LICQ), so the multipliers $y$ and $\nu$ are unique;
+
+    \item $Lx\neq0$, so the cone's boundary is smooth at the solution,
+    the outward normal $u=Lx/\|Lx\|_2$ is defined, and the tangent
+    representation of Section~3.2 is the correct local description;
+
+    \item strict complementarity holds: an active constraint has a
+    strictly positive multiplier, and an inactive one has a zero
+    multiplier with strictly positive slack.
+\end{enumerate}
+
+Under these three the working set at the solution is unique, the
+active-set iteration is locally exact, and warm starting a nearby
+problem transfers a working set that is correct rather than merely
+close.
+
+\paragraph{Degenerate cases, and what each one costs.} Each of the
+three can fail independently, and the algorithm's response to each is
+different.
+
+\begin{enumerate}
+    \item \emph{LICQ fails} --- the active rows are linearly
+    dependent. The direction $d$ remains unique, because $H\succ0$ and
+    $Wd=0$ does not care about redundancy; the multipliers do not.
+    Section~8.3's dependent-constraint removal repairs the working set
+    exactly where the dependent rows may be dropped, and regularization
+    answers a nearby question where they may not. Removal is tried
+    first because it leaves the arithmetic exact.
+
+    \item \emph{$Lx=0$ at the solution} --- the apex. The tangent has
+    no meaning there; the tangent cone of $\mathcal Q$ becomes
+    $\mathcal Q$ itself and its normal cone becomes $-\mathcal Q$, so
+    the dual test becomes a cone \emph{membership} rather than a sign.
+    This is not exotic: a rank-$k$ covariance over $n\gg k$ assets has
+    a large null space, the minimum-risk portfolio has risk exactly
+    zero, and $\lambda>0$ takes it. On the tested factor-model
+    families the apex is consistently \emph{cheaper} than the ordinary
+    case rather than harder.
+
+    On eq.~(7), however, an apex that is \emph{not} justified by its
+    multiplier cannot be released. Dropping the factor forces
+    $\rho\,\tau=-\lambda$, hence $\tau<0$, and the resulting direction
+    is conically infeasible by arithmetic rather than by tolerance.
+    The implementation reports this as a distinct terminal status; it
+    occurs on about 1.5\% of randomly generated instances and is the
+    one place where the working-set concept of Section~3.2 is
+    genuinely insufficient.
+
+    \item \emph{Strict complementarity fails} --- a constraint is
+    active with a zero multiplier. The solution is still optimal and
+    still certified, but the working set at it is not unique. The cost
+    is borne by warm starts: Section~11's experiment shows warm
+    starting saving 18--55\% of iterations at points whose working set
+    transfers and \emph{costing} 17--32\% at points where it must be
+    corrected, and it is exactly the non-unique working sets that
+    change between neighbouring problems.
+\end{enumerate}
+
+\paragraph{One assumption that \emph{is} required, and was not stated.}
+The residual criterion of Section~6 certifies global optimality only
+where the instance is well enough scaled that a \emph{relative}
+residual bounds the objective error. Section~15.6 exhibits an instance
+where it does not: all five residuals inside $10^{-11}$ at a point
+$3.4\%$ from the optimum, because the normalization divides by
+$\|c\|_\infty\approx2\times10^{6}$ and the conditioning amplifies what
+is left. Stating this is Deliverable~1's job and it is the one
+assumption the plan did not anticipate needing.
+
+\paragraph{One assumption that is not required.} No assumption is made
+about the conditioning of $\Sigma$. The tangent representation enters
+the KKT system as a \emph{single row}, and a single row has no
+spectrum, so the assembled system does not inherit $\kappa(\Sigma)$: on
+an instance with $\kappa(\Sigma)\approx10^{10}$ the KKT matrix is
+conditioned around $10$. This is a genuine structural difference from
+interior-point methods, where the barrier's Hessian carries $\Sigma$
+into the system directly.
 
 % ============================================================
 \section{Software Architecture}
@@ -1130,10 +1329,225 @@ The objective values should agree to within the prescribed numerical
 tolerance.
 
 % ============================================================
+\section{Results}
+% ============================================================
+
+Every number in this section is generated by
+\verb|python -m cosa.experiments| and is committed alongside the
+prose that quotes it. Seeds are arguments with recorded defaults, so
+the command with no arguments reproduces the tables below; the two
+artifacts that report wall-clock time and a platform are not
+byte-reproducible and say so.
+
+\subsection{Accuracy}
+
+Across all four benchmark modes of Section~12 and both draws, every
+generated problem's objective agrees with the reference solver to
+within $10^{-6}$ relative --- 18 of 18 comparisons, with observed gaps
+between $10^{-11}$ and $10^{-9}$. The five conic KKT residuals of
+Section~6 at termination lie between $10^{-10}$ and $10^{-9}$.
+
+Success Criterion~5 asks for that agreement on \emph{every} generated
+problem, and across the wider set of instance families it does not
+hold. Twelve of thirteen families agree to $10^{-9}$ or better; the
+thirteenth does not, and Section~15.6 is that result. It is the
+paper's most important negative finding and it is a statement about
+the stopping criterion rather than about the arithmetic.
+
+\subsection{Robustness}
+
+Thirteen instance families, three seeds each, twenty assets:
+thirty-six solve and three do not. Outcomes are classified into five
+rather than reported as a status string, and the classification is not
+permitted to be self-certified --- a verdict of \emph{solved} requires
+that the loop report optimality, that Section~6's residuals confirm
+it, \emph{and} that a reference solver agree about the objective:
+
+\begin{center}
+\begin{tabular}{lr}
+\hline
+verdict & count\\
+\hline
+solved (optimal, certified, and the reference agrees) & 36\\
+\textbf{wrong} (optimal and certified, disagreeing with the reference)
+& \textbf{3}\\
+loose (optimal, residuals do not quite agree) & 0\\
+unchecked (no reference was available) & 0\\
+diagnosed (stopped, and named what happened) & 0\\
+undiagnosed (the iteration limit, which names nothing) & 0\\
+\hline
+\end{tabular}
+\end{center}
+
+The \emph{wrong} category is the one worth having and it did not exist
+until the study stopped certifying itself. A diagnosed stop is honest
+and an undiagnosed one is at least visible; a wrong answer looks like
+success.
+
+Notable individual results. The factor-model families, whose optima
+lie at the apex, are consistently \emph{faster} than the basic family
+rather than harder: 179 iterations against 253 across three seeds, a
+saving of 29\%. The degenerate-optimum family, whose
+active rows are linearly dependent at the solution, solves in four
+iterations to a residual at rounding level, because Section~8.3's
+dependent-row removal is exact rather than approximate. The
+ill-conditioned family, with $\kappa(\Sigma)\approx10^{10}$, solves
+without special handling, for the single-row reason given in
+Section~14.4.
+
+No M7 mitigation changes any outcome. Section~8.3's regularization is
+never reached, because dependent-row removal always succeeds first;
+Section~13.2's reuse is a cost policy and computes the same direction
+by a different route; and Section~13.3's Ruiz equilibration costs
+between 30\% and 80\% more iterations on every family and rescues
+none.
+
+\subsection{A Certificate That Certifies the Wrong Answer}
+
+One family fails, and it fails in the most instructive way available.
+
+The instance is deliberately badly scaled: $\|A\|_\infty\approx10^{-4}$
+while $\|G\|_\infty$ and $\|c\|_\infty$ are around $10^{6}$. COSA
+terminates on it reporting \emph{optimal}, with all five of
+Section~6's residuals between $10^{-11}$ and $10^{-15}$, at the point
+whose objective is $-0.00524$. The reference solver returns $-0.03956$
+--- and that point is feasible for COSA's \emph{own} feasibility test
+to $10^{-11}$, with a strictly better objective. The direction between
+the two is a feasible descent direction with derivative $-0.0343$. No
+tolerance argument survives that: a better feasible point
+demonstrably exists.
+
+The residual is not lying. The stationarity residual there is
+$1.93\times10^{-5}$ in absolute terms; Section~14.2 reports it
+relative to the objective's scale, dividing by
+$\max(1,\|c\|_\infty)=2\times10^{6}$, which prints $9.7\times10^{-12}$.
+A convex problem cannot have an exactly satisfied KKT system at a
+suboptimal point and this one does not --- the residual is real, and
+it is simply small enough relative to data of size $10^{6}$ that a
+\emph{relative} certificate cannot distinguish it from zero, while the
+conditioning amplifies it into a 3.4\% objective error.
+
+\textbf{The certificate is relatively satisfied and the answer is
+wrong, and neither of those is a mistake in the other.} That is the
+finding. It says that the residual criterion of Section~6, which
+Success Criterion~2 asks to be "mathematically meaningful", is
+meaningful and not \emph{sufficient}: on an instance whose data spans
+fourteen orders of magnitude a relative KKT residual admits an
+answer that is percent-wrong. An absolute floor, or a normalization
+that does not divide by $\|c\|_\infty$, is what the criterion is
+missing, and stating that is Deliverable~1's business rather than a
+defect to be patched quietly.
+
+Two things this is \emph{not}. It is not a scaling problem:
+equilibrated, the same instance lands at $-0.00540$ against the same
+reference, a gap indistinguishable from the unscaled solve's. Scaling
+changes the appearance of the residual and never the answer. And it is
+not the earlier diagnosis, which was that the family stalls --- it
+does now run to completion, because the routine that repairs conic
+feasibility by setting $t=\|Lx\|_2$ had required the cone's head row to
+select its variable with a coefficient of exactly one, which no
+rescaled instance satisfies, so the retraction was silently
+unavailable and a boundary iterate could not move at all.
+
+That earlier diagnosis had a clean before-and-after table supporting
+it: the family stalled, equilibration produced an apparent optimum,
+and the conclusion drawn was conditioning. The ablation was sound and
+what it measured was a coincidence. \textbf{A diagnosed failure is a
+hypothesis}, and a study that certifies itself will confirm whichever
+hypothesis it started with.
+
+\subsection{Warm starts}
+
+This is the project's central hypothesis and the result is a
+conditional, not a number.
+
+Along the frontier of Section~11, warm starting saves work at the
+points where the carried working set turns out to be correct and
+\emph{costs} work at the points where the iteration must correct it:
+
+\begin{center}
+\begin{tabular}{lrrr}
+\hline
+& 8 assets & 10 assets & 12 assets\\
+\hline
+working set transferred & $+55\%$ & $+18\%$ & $+18\%$\\
+working set corrected & $-27\%$ & $-17\%$ & $-32\%$\\
+\hline
+overall & $+44\%$ & $+9\%$ & $-7\%$\\
+\hline
+\end{tabular}
+\end{center}
+
+The per-group figures are nearly identical across instances; what
+differs is the \emph{mix}. Correcting a belief is more expensive than
+acquiring one: a cold solve discovers the active set on the way in,
+while a warm one must first undo a wrong answer and then discover it
+anyway. Reporting a single headline number would have hidden this.
+
+The factorization cache is carried across the sequence as well, so a
+frontier of twenty-four points requires two factorizations in total
+rather than twenty-four.
+
+\subsection{Cost}
+
+Section~13.2's factorization reuse behaves as predicted on its own
+metric and not on wall clock. The share of KKT solves requiring a
+fresh factorization falls from 98.9\% to 1.4\% across the instance
+families and from 98.7\% to 1.5\% across the randomized sweep.
+
+Wall clock does not follow, and the reason is structural. A column
+update against a full $n\times n$ orthogonal factor costs $O(n^2)$,
+while a fresh QR of an $n\times m$ matrix costs $O(nm^2)$, so updating
+wins only once $m^2$ exceeds $n$. The classical argument for
+factorization updating assumes a working set comparable in size to the
+problem; an active-set method on a portfolio runs with $m$ well below
+$n$. Measured on the box-constrained family, updating is $0.98\times$
+the refactorizing cost at $n=300$ and $1.12\times$ at $n=500$.
+
+Section~4.2's correction to $H$ is the largest single improvement
+measured. Replacing $H=\rho I$ with the Lagrangian Hessian of
+eq.~(4b):
+
+\begin{center}
+\begin{tabular}{lrr}
+\hline
+& $H=\rho I$ & $H$ of eq.~(4b)\\
+\hline
+eleven families, 66 solves & 9738 iterations & 4691\\
+\quad reaching an optimum & 62 of 66 & 66 of 66\\
+randomized sweep, 200 instances & 62631 iterations & 19386\\
+\quad reaching an optimum & 162 of 200 & 192 of 200\\
+\hline
+\end{tabular}
+\end{center}
+
+\subsection{Comparison with an interior-point solver}
+
+Against CVXPY with Clarabel, on the same instances, COSA is between
+three and thirty times \emph{slower} in wall clock --- and the
+comparison includes CVXPY's modelling overhead, so it is if anything
+generous to COSA.
+
+This is reported rather than omitted. Section~20 states that the most
+important result need not be that COSA is faster than every
+interior-point solver, and it is not. What the measurements support is
+narrower and is stated in Section~20.1.
+
+% ============================================================
 \section{Research Risks}
 % ============================================================
 
 \subsection{Risk 1: The SOC Working-Set Concept May Be Insufficient}
+
+\emph{Answered, and the answer is a qualified yes with one exception.}
+The three-valued working set --- inactive, tangent, apex --- together
+with a multiplier-driven deactivation rule is sufficient to
+\emph{represent} the geometry. What it could not do was \emph{step},
+because the direction knew only the boundary's tangent plane; eq.~(4b)
+supplies the missing derivative and the randomized sweep goes from 162
+to 192 instances reaching an optimum. The exception is the unjustified
+apex of Section~14.4, which occurs on about 1.5\% of randomly
+generated instances and is not fixable by a working-set rule.
 
 The boundary of a second-order cone has richer geometry than a
 polyhedral inequality.
@@ -1143,6 +1557,25 @@ algorithm will be generalized to use cone faces and normal-cone
 information.
 
 \subsection{Risk 2: Cycling}
+
+\emph{Observed, diagnosed and resolved.} The cycle that occurred was
+not the one anticipated. A randomly generated instance alternated
+between the apex and the inactive state 486 times: the apex branch
+released a factor it could not justify, the released direction could
+not be travelled, so the step moved nothing and the geometric
+activation rule read the same unchanged slack and restored the factor.
+The remedy is to not re-derive a status from geometry that has not
+changed. Across 200 randomly generated instances the worst working set
+is now returned to twice.
+
+Two measurement errors are worth recording beside it. The revisit
+counter initially counted iterations \emph{held} on a working set
+rather than returns \emph{to} it, which reported nine hundred revisits
+for a solve that was merely converging slowly and concealed the real
+cycle underneath. And a solver may repeat an iteration that changes
+neither the iterate nor the working set; that is cycling of a
+degenerate kind and is detected directly, rather than through a
+threshold on the direction's size.
 
 As in classical active-set methods, the algorithm may cycle among
 working sets.
@@ -1163,6 +1596,19 @@ may produce unstable KKT systems.
 
 This will be addressed through scaling, rank detection,
 regularization, and robust factorizations.
+
+\emph{Partly answered, and the residue is not where it was expected.}
+The KKT system does not inherit $\kappa(\Sigma)$, because the tangent
+representation enters it as a single row and a single row has no
+spectrum --- so the obvious instability route is closed. Rank
+deficiency is likewise not a difficulty. Scaling turns out to rescue
+no family and to cost 30--80\% more iterations on every one.
+
+What is left is Section~15.6: on a badly scaled instance the
+\emph{stopping criterion} rather than the linear algebra is what
+fails, certifying an answer that is percent-wrong. Robust
+factorizations do not help with that and neither does equilibration.
+It is a criterion problem.
 
 \subsection{Risk 4: Poor Generic Performance}
 
@@ -1255,6 +1701,46 @@ The project will conclude with the following deliverables.
     \item A research paper describing the method and results.
 \end{enumerate}
 
+\subsection{Status}
+
+All ten exist. Where a deliverable is a document rather than code, the
+document is named; where it is code, the module is.
+
+\begin{center}
+\begin{tabular}{rll}
+\hline
+& deliverable & where\\
+\hline
+1 & mathematical specification & Sections 2--8, 14.4\\
+2 & working implementation & \verb|cosa.solver|\\
+3 & unit-tested SOC geometry library & \verb|cosa.geometry|\\
+4 & active-set/KKT linear algebra & \verb|cosa.active_set|,
+\verb|cosa.linear_algebra|\\
+5 & portfolio optimization interface & \verb|cosa.solve_portfolio|\\
+6 & benchmark suite & \verb|cosa.experiments.benchmarks|\\
+7 & comparisons against SOCP solvers & Section 15.5\\
+8 & warm-start frontier experiments & Section 15.3,
+\verb|cosa.experiments.frontier|\\
+9 & documentation, reproducible experiments &
+\verb|python -m cosa.experiments|\\
+10 & research paper & this document\\
+\hline
+\end{tabular}
+\end{center}
+
+Deliverable~1 is the one that was deferred to itself: Section~14.4
+states the standing assumptions, the constraint qualification, the
+generic case and what each degenerate case costs.
+
+Success Criterion~7 --- modularity sufficient to support extensions
+beyond the initial portfolio application --- is \emph{demonstrated}
+rather than asserted, in \verb|tests/test_modularity.py|: an SOCP with
+two and then three independent second-order cones, none of them a
+portfolio, solved through the ordinary entry point and checked against
+a reference solver. No module in \verb|cosa.solver| is edited,
+subclassed or monkeypatched, and the test asserts that of itself by
+parsing its own syntax tree.
+
 % ============================================================
 \section{Longer-Term Extensions}
 % ============================================================
@@ -1341,6 +1827,83 @@ than every interior-point solver. A valuable result would instead be
 a clear characterization of when conic active-set methods work well,
 why they work well, and how their geometry differs fundamentally from
 polyhedral active-set methods.
+
+\subsection{The Characterization}
+
+That characterization is the project's principal result and is stated
+here in the form the measurements of Section~15 support.
+
+\paragraph{When they work well.} On \emph{sequences} of related
+problems whose active set is stable, and specifically on the subset of
+a sequence where it transfers unchanged. There, warm starting saves
+18--55\% of the iterations and the factorization is reused rather than
+recomputed. Where the active set must be corrected, warm starting
+\emph{costs} 17--32\%, and the sign of a whole sweep is decided by the
+mix of the two. The condition is not "the problems are close" but "the
+combinatorial state is the same"; those are not the same condition,
+and a frontier can move steadily in $\lambda$ while its active set
+jumps.
+
+\paragraph{Why they work well there.} Because the state an active-set
+method carries is combinatorial and an interior-point method's is not.
+A previous solution is on the boundary of the feasible set, which is
+the worst possible place to begin a central path from; the same
+solution's \emph{working set} is exactly the information the next
+solve would otherwise spend most of its iterations rediscovering. The
+asymmetry is not about the quality of the starting point, it is about
+what kind of object is being carried.
+
+\paragraph{How the geometry differs from the polyhedral case.} In four
+ways, each of which showed up as an implementation consequence rather
+than as a remark.
+
+\begin{enumerate}
+    \item \emph{The active constraint is a face, not a hyperplane.} A
+    polyhedral working set is a set of indices. A conic one is a set
+    of indices \emph{plus a state per cone factor}: inactive, tangent,
+    or at the apex. The three are not degrees of the same thing --- at
+    a tangent factor the dual condition is a scalar sign test, and at
+    the apex it is a cone membership test, because the normal cone of
+    a self-dual cone at its apex is $-\mathcal Q$.
+
+    \item \emph{The active set moves continuously.} A linear
+    constraint enters and leaves the working set discretely. The
+    cone's tangent row changes on \emph{every} iteration the cone is
+    active, because $u=Lx/\|Lx\|_2$ moves with $x$. Factorization
+    updating survives this, but only because the update is applied to
+    $W^\top$, where a moving tangent replaces one column and the
+    remaining structure is untouched.
+
+    \item \emph{A boundary iterate cannot move under a linear step.}
+    This is the sharpest difference and it is a theorem, not a
+    numerical difficulty. At a boundary point a direction satisfying
+    the tangency condition eq.~(3) has an exact conic step of
+    \emph{zero}: tangency annihilates eq.~(6)'s middle coefficient,
+    feasibility annihilates its constant term, and Cauchy--Schwarz puts
+    its leading coefficient at or above zero. A polyhedral active set
+    has no analogue --- a face of a polyhedron is flat, so a step along
+    it stays on it. The remedy is a retraction, and the cost of the
+    retraction is why the method is first-order along a curved
+    boundary unless the direction is given the boundary's curvature,
+    which is eq.~(4b).
+
+    \item \emph{The conditioning does not transfer.} The tangent
+    representation puts $L$ into the KKT system as a single row, and a
+    single row has no spectrum, so the assembled system does not
+    inherit $\kappa(\Sigma)$. The same structure destroys sparsity: $u$
+    is a normalized covariance direction and therefore dense in every
+    asset, so however sparse $A$ is, one dense row and its transpose
+    put a dense cross in the matrix. A conic active-set method is
+    better conditioned and less sparse than the polyhedral intuition
+    predicts, and both facts have the same cause.
+\end{enumerate}
+
+\paragraph{Where they do not work well.} On single problems solved
+once, where the reference solver is three to thirty times faster; and
+at an apex whose multiplier does not justify it, where on eq.~(7) the
+release the dual conditions authorize is arithmetically unavailable.
+The second is a genuine limitation of the working-set concept rather
+than of this implementation of it.
 
 % ============================================================
 \section{Summary}

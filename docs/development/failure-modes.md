@@ -18,20 +18,23 @@ print(failures.report())
 
 ## The result
 
-Thirteen families, three seeds each, twenty assets. **All thirty-nine solved.**
+Thirteen families, three seeds each, twenty assets. **Thirty-six solved, three wrong.**
 
 | verdict | meaning | count |
 | --- | --- | --- |
-| `solved` | optimal, and §6's five residuals certify it | 39 |
+| `solved` | optimal, §6's residuals certify it, *and* a reference solver agrees | 36 |
+| `wrong` | optimal and certified, and **disagreeing with the reference** | **3** |
 | `loose` | the loop called it optimal, the residuals do not quite agree | 0 |
+| `unchecked` | no reference was available, so nothing was verified | 0 |
 | `diagnosed` | stopped, and named what happened | 0 |
 | `undiagnosed` | the iteration limit, which names nothing | 0 |
 
-The distinction between the last two is still the point of the study, even though both
-columns are now empty. `degenerate`, `stalled` and `blocked-at-apex` each name a specific
-thing that happened and each has an issue behind it; `iteration_limit` is the solver saying
-it does not know. Keeping them apart is what let the one failure below be diagnosed
-correctly — and the first diagnosis was wrong.
+**`wrong` is the category that matters, and it did not exist until the study stopped
+certifying itself.** A `diagnosed` stop is honest and an `undiagnosed` one is at least
+visible. A `wrong` answer looks like success: the loop reports `optimal`, all five of §6's
+residuals are inside their tolerance, and the answer is several percent away from the
+reference's. Only a cross-check catches it — which is what Success Criterion 5 has always
+asked for, and what this study was not doing.
 
 ## Per family
 
@@ -49,7 +52,7 @@ correctly — and the first diagnosis was wrong.
 | nearly active cone | solved | 5e-11 | 90 | §8.2's band |
 | degenerate optimum | solved | 2e-16 | 4 | dependent active set |
 | many active bounds | solved | 1e-10 | 42 | |
-| badly scaled | solved | 1e-11 | 1000 (the whole budget) | see below |
+| badly scaled | **wrong** | 1e-11 residual, 3.4e-2 gap | 1000 (the whole budget) | see below |
 
 ### Behaviour at the apex
 
@@ -95,60 +98,74 @@ singular-KKT guard never fired, because LAPACK raises only on an exactly zero pi
 dependent set gives `1e-18`. The guard became an explicit rank test. The family existed for
 about ten minutes before it earned its place.
 
-## The failure that was not what it looked like: `badly scaled`
+## The one failure: `badly scaled`, and two wrong diagnoses before the right one
 
-This section had a different conclusion two waves ago, and how it changed is more useful
-than what it now says.
+This section has had three conclusions. The first two were wrong, and how they were wrong is
+more useful than the current one.
 
-`badly scaled` puts a constraint matrix spanning fourteen orders of magnitude in front of
-the solver. It used to **stall** at all three seeds, with residuals around `5e-2`, and
-§13.3's Ruiz equilibration rescued it — `stalled` at `5e-2` became `optimal` at `9.7e-7`.
-That is a clean before-and-after and it pointed at conditioning, so equilibration became the
-mitigation for this family and, briefly, the default for the public interface.
+`badly scaled` puts a constraint matrix spanning fourteen orders of magnitude in front of the
+solver — `|A|` around `1e-4`, `|G|` and `|c|` around `1e6`.
 
-**It was the wrong diagnosis.** Building that public interface exposed the real cause.
-`raise_free_heads` — the routine that repairs conic feasibility by setting `t = ||Lx||` —
-required the cone's head row to select its variable with a coefficient of *exactly one*:
+**First conclusion: a conditioning failure that scaling fixes.** The family stalled at a
+residual around `5e-2`, and §13.3's Ruiz equilibration converted the stall into an apparent
+optimum at `9.7e-7`. Clean before-and-after, and wrong.
+
+**Second conclusion: an initialization bug, and it solves unaided.** Building the public
+interface exposed that `raise_free_heads` — the routine that repairs conic feasibility by
+setting `t = ||Lx||` — required the cone's head row to select its variable with a coefficient
+of *exactly one*:
 
 ```python
 if selected.size != 1 or row[selected[0]] != 1.0:
     return None
 ```
 
-Nothing needs that. The head is `coefficient * t + h_head` and solving `head >= ||tail||`
-for `t` is one division whatever the coefficient is. But `badly_scaled`'s head row does not
-have a unit coefficient, so the routine refused, `_heads_are_free` reported `False`, **the
-retraction was silently unavailable**, and an iterate on the cone's boundary could not move
-at all. That is not a conditioning failure. It is Risk 1 — the boundary-immobility result —
-arriving with its remedy switched off.
+Nothing needs that; the head is `coefficient * t + h_head` and solving `head >= ||tail||` is
+one division. But no *rescaled* instance satisfies it, so `_heads_are_free` reported `False`,
+**the retraction was silently unavailable**, and an iterate on the cone's boundary could not
+move at all. That is Risk 1 — the boundary-immobility result — arriving with its remedy
+switched off, and equilibration had been "fixing" it by perturbing the head row's
+coefficient. With the restriction removed the family runs to completion with every residual
+under `1e-11`, which the study reported as `solved`.
 
-With the restriction removed:
+**It was not solved.** That verdict was self-certified: the study trusted §6's residuals and
+never asked a reference solver. It should have.
 
-| | verdict | residual | iterations |
-| --- | --- | --- | --- |
-| as given | `optimal` | **1e-11** | 5000 |
-| equilibrated | `optimal` | 9.7e-7 | 5000, and one seed hits the limit |
+| | objective | feasibility of that point |
+| --- | --- | --- |
+| COSA | −0.00524 | worst `Az−b` = −2.5e-2, `\|Ez−d\|` = 1.6e-15, cone slack 0 |
+| CLARABEL | **−0.03956** | worst `Az−b` = −5.0e-11, `\|Ez−d\|` = 2.2e-16, cone slack 1.5e-12 |
 
-The family solves to eleven digits without help, and **equilibrating makes it five orders of
-magnitude worse.** Equilibration was never fixing the conditioning; it was perturbing the
-head row's coefficient, which is a different thing entirely and worked by accident.
+The reference's point is feasible for COSA's *own* feasibility check to `1e-11`, and its
+objective is 7.5× better. The direction from COSA's point to it is a feasible descent
+direction with derivative −0.0343. No tolerance argument survives that: a better feasible
+point demonstrably exists.
 
-Three things follow.
+### Why the residual does not notice
 
-- **The public interface does not equilibrate.** `solve_portfolio(..., scale=False)` is the
-  default; the flag remains for a caller whose units are genuinely pathological.
-- **§13.3's scaling has no family it rescues.** It costs between 30% and 80% more iterations
-  on every family and changes no verdict. That is a real result about this formulation and
-  it is consistent with an earlier one: the KKT system does not inherit the covariance's
-  conditioning, because the tangent puts `L` in as a single row. There is less conditioning
-  here to fix than there looks to be.
-- **A "diagnosed" stop is a hypothesis, not a conclusion.** `stalled` named the symptom
-  correctly and the study attributed it to the wrong cause, for two waves, with a
-  before-and-after table apparently confirming it. The ablation was sound; what it measured
-  was a coincidence.
+Both statements are true at once, and that is the whole difficulty.
 
-`badly scaled` still costs the entire iteration budget, which is the honest remaining
-caveat: it converges, and slowly.
+- The stationarity residual there is **1.93e-05 absolute**.
+- §14.2 reports it relative to the objective's scale, dividing by `max(1, |c|_inf)` — and
+  `|c|_inf` is `2e6`. So it prints as **9.7e-12**.
+
+A convex problem cannot have an *exactly* satisfied KKT system at a suboptimal point, and
+this one does not: the residual is real. It is simply small enough, relative to data of size
+`1e6`, that a relative certificate cannot distinguish it from zero — while the conditioning
+amplifies it into a 3.4% objective error. **The certificate is relatively satisfied and the
+answer is wrong, and neither of those is a mistake in the other.**
+
+That is a statement about what a relative KKT residual can promise on an ill-conditioned
+instance, and it is the most important thing in this document. It also means §6's tolerance
+is not a sufficient stopping criterion on its own for instances of this kind — a finding for
+[#22](https://github.com/tschm/cosa/issues/22) and
+[#41](https://github.com/tschm/cosa/issues/41) rather than one this study can fix.
+
+### And equilibration still does not help
+
+Worth stating, since it was the first conclusion. Equilibrated, the same instance lands at
+−0.00540 against the reference's −0.03956 — a gap of 3.4e-2, indistinguishable from the
+unscaled solve's. Scaling changed the *appearance* of the residual and never the answer.
 
 ## Which mitigation addressed which failure
 
@@ -160,8 +177,8 @@ caveat: it converges, and slowly.
 | §13.2 factorization reuse | no | factorizations 98.9% → 1.4%, iterations +30% |
 | §13.3 Ruiz equilibration | no | iterations +30% to +80%, and one residual five orders worse |
 
-**No mitigation changes an outcome any more**, which is a stronger statement than the one
-this table used to make. Everything solves without help.
+**No mitigation changes an outcome**, including for the family that fails: nothing rescues
+`badly scaled`, equilibration included.
 
 Two more things it says that are easy to miss.
 
@@ -198,9 +215,13 @@ Their before-and-after evidence lives in `tests/test_conic_logic.py` and
 
 ## Open
 
-- **`badly scaled` converges, and spends the whole iteration budget doing it.** It is no
-  longer a robustness failure; it is the slow-convergence question below wearing a different
-  hat.
+- **`badly scaled` terminates claiming optimality at a wrong answer.** The open question is
+  not the family, it is the criterion: a relative KKT residual cannot certify an instance
+  whose data spans fourteen orders of magnitude, and §6 currently has no absolute floor.
+  That belongs to [#22](https://github.com/tschm/cosa/issues/22).
+- **Every "solved" verdict now requires a reference solver to agree**, so a study run without
+  one reports `unchecked` rather than `solved`. The self-certified version of this study was
+  wrong for two waves in two different directions.
 - **`blocked-at-apex` on 3 of 200 randomized instances.** [#39](https://github.com/tschm/cosa/issues/39).
   Not a tolerance problem and not fixable by a working-set rule; the release the multiplier
   authorizes is arithmetically unavailable.

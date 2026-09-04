@@ -38,6 +38,15 @@ computation and #23's deactivation test are both statements about that single nu
 golden instances of ``tests/test_socp.py`` are the arithmetic check: their hand-derived
 ``w`` is this covector scaled by ``lam``.
 
+**Curvature is here too, and it is what "the tangent alone" is missing.** §3.3
+(``paper.tex:301``) says the tangent representation is the *initial* one and the final
+algorithm is to be "formulated in terms of the primal-dual conic KKT conditions". The gap
+between those two is exactly one derivative: the tangent gives the constraint's *gradient*
+at a boundary point, and the boundary is curved, so a method that knows only the gradient
+crawls along it. :func:`curvature` supplies the second derivative, and #23 puts it into the
+direction subproblem weighted by the conic multiplier -- which is what makes that
+computation primal-*dual* rather than primal with a dual afterthought.
+
 **The apex is refused, loudly.** ``u`` does not exist at ``L @ x = 0``, and §8.1
 (``paper.tex:623``) says so: the apex "has a different tangent and normal geometry from a
 smooth nonzero boundary point". Every function here raises :class:`ApexError` rather than
@@ -63,6 +72,7 @@ if TYPE_CHECKING:
 __all__ = [
     "ApexError",
     "NotOnBoundaryError",
+    "curvature",
     "outward_normal",
     "require_boundary",
     "tangent_covector",
@@ -318,3 +328,47 @@ def require_boundary(s: Vector, *, tolerance: float = TOLERANCE, scale: float | 
         raise ApexError()
     if not is_boundary(s, tolerance=tolerance, scale=scale):
         raise NotOnBoundaryError(slack(s))
+
+
+def curvature(s: Vector, *, tolerance: float = TOLERANCE, scale: float | None = None) -> Matrix:
+    """The second derivative of ``g(s) = ||s_1|| - s_0`` at a boundary point.
+
+    The constraint function is linear in the head and a norm in the tail, so all of its
+    curvature lives in the tail block:
+
+        d^2 g / ds^2 = [[0, 0], [0, (I - u u.T) / ||s_1||]]
+
+    which is the projector off ``u``, scaled by the distance from the axis. Two properties
+    make it the right thing to hand a direction subproblem:
+
+    * it is **positive semidefinite**, so adding a non-negative multiple of it to ``rho*I``
+      keeps the subproblem convex and its solution unique. That is not automatic for a
+      Lagrangian Hessian in general -- it is a gift of the constraint being convex.
+    * it is **singular along** ``u``. Moving radially -- straight out along the tail --
+      changes ``||s_1||`` at a constant rate, so there is no curvature in that direction,
+      and the matrix says so. The curvature is entirely in the directions that *turn*.
+
+    It also grows without bound as ``||s_1||`` falls, which is the apex announcing itself
+    from a distance: the boundary's curvature is what becomes infinite there, not merely the
+    tangent's definition that fails. #24's branch is the answer, and this function refuses
+    the point rather than returning an enormous matrix.
+
+    Args:
+        s: the boundary point, head first.
+        tolerance: the vanishing-tail tolerance.
+        scale: the problem scale for that test, or ``None`` to derive it from ``s``.
+
+    Returns:
+        The full ``(s.size, s.size)`` second derivative, in this factor's slack coordinates.
+        The head row and column are zero.
+
+    Raises:
+        ApexError: if ``s``'s tail vanishes, which includes the apex.
+    """
+    unit = unit_tail(s, tolerance=tolerance, scale=scale)
+    _, tail = _split(s)
+    norm = float(np.linalg.norm(tail))
+    block = (np.eye(unit.size) - np.outer(unit, unit)) / norm
+    second = np.zeros((unit.size + 1, unit.size + 1))
+    second[1:, 1:] = block
+    return second

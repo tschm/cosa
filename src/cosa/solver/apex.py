@@ -47,8 +47,10 @@ This module holds instead, and says so in :attr:`ApexDirection.reason`. Holding 
 feasible and often still a descent direction, so nothing is broken; but a dual violation
 that the branch cannot act on is exactly the shape of Risk 1
 ([#39](https://github.com/tschm/cosa/issues/39)) -- "the SOC working-set concept may be
-insufficient". If that reason is ever seen in practice, #39 is the issue it belongs to,
-and #23's primal-dual conic working-set logic is where the fix would live. Recording it is
+insufficient". If that reason is ever seen in practice, #39 is the issue it belongs to.
+#23's :func:`cosa.active_set.updates.deactivate_cones` is the rule that *would* authorize
+the release; what it cannot supply is a feasible direction to release into, which is why
+the case survived it. Recording it is
 more useful than pretending the case does not arise.
 
 **On eq. (7) that case is not an edge case -- it is the only case.** Releasing by dropping

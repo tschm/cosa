@@ -17,10 +17,11 @@ them:
   detection and regularization, and it is the only one of the three that alters *what the
   solver believes is active*. :func:`drop_dependent_rows` is it. Losing it among the
   factorization work is the mistake #25 explicitly warns about.
-* **§7.4 SOC deactivation.** Deliberately *not* here. The plan calls it "a key research
-  component" and says the decision must come from the conic multiplier and the normal-cone
-  conditions rather than from the geometry, so it belongs to #23. What this module offers
-  is :func:`set_cone_status`, the primitive that issue will drive.
+* **§7.4 SOC deactivation.** "A key research component" (``paper.tex:609``), answered by
+  #23. The decision is not geometric: a factor stays active for as long as its conic
+  multiplier says the cone contributes a genuine active normal, and is turned off the
+  moment it does not. :func:`deactivate_cones` is that rule, built on
+  :func:`set_cone_status`.
 
 Every function is pure: it takes a working set and returns a new one, or takes a working
 set and returns an index. Nothing is mutated, and no function here solves anything -- the
@@ -50,6 +51,9 @@ from __future__ import annotations
 from dataclasses import replace
 from typing import TYPE_CHECKING, Final
 
+import numpy as np
+
+from cosa.active_set.multipliers import Multipliers, dual_cone_violation
 from cosa.active_set.working_set import ConeStatus, WorkingSet
 from cosa.geometry.soc import ConePosition, positions
 from cosa.problem.socp import SIGN_CONVENTION, ProblemError, _vector
@@ -65,6 +69,7 @@ __all__ = [
     "activation_candidates",
     "add_inequality",
     "cone_status_for",
+    "deactivate_cones",
     "drop_dependent_rows",
     "drop_inequality",
     "inequality_slack",
@@ -223,8 +228,8 @@ def cone_status_for(position: ConePosition) -> ConeStatus:
 
     Returns:
         The status the geometry argues for. §7.3 warns this is not the last word: a cone
-        can be geometrically active and still carry no genuine active normal, which is
-        #23's business.
+        can be geometrically active and still carry no genuine active normal, and
+        :func:`deactivate_cones` is what asks.
     """
     match position:
         case ConePosition.INTERIOR:
@@ -238,9 +243,8 @@ def cone_status_for(position: ConePosition) -> ConeStatus:
 def set_cone_status(working_set: WorkingSet, index: int, status: ConeStatus) -> WorkingSet:
     """Set cone factor ``index``'s status, whatever it currently is.
 
-    The unconditional primitive. Activation has a rule of its own in
-    :func:`activate_cones`; deactivation does not have one yet, on purpose -- §7.4 makes it
-    a research question and #23 answers it -- so this is what that issue will build on.
+    The unconditional primitive that both rules are built from:
+    :func:`activate_cones` for §7.3 and :func:`deactivate_cones` for §7.4.
 
     Args:
         working_set: the set to change.
@@ -281,7 +285,8 @@ def activate_cones(
       only about which face of it is.
     * an active factor whose slack has grown is **left active**. Turning it off is
       deactivation, and §7.4 refuses to decide that on the geometry alone. This function
-      is monotone in activity by design; #23 is what turns a cone off.
+      is monotone in activity by design; :func:`deactivate_cones` is what turns a cone off,
+      and it reads the multiplier rather than the slack.
 
     Args:
         problem: the instance, for its cone product and conic slack.
@@ -322,8 +327,8 @@ def drop_dependent_rows(
     **Only inequalities may be dropped, and that is not a simplification.** §3.1 imposes
     every equality unconditionally, so an equality row is not the solver's to remove even
     when it is the redundant one; and a cone's rows encode a geometric belief that §7.4
-    hands to the conic multiplier, so removing one is #23's decision and not a numerical
-    repair. When the dependency lies entirely among rows that cannot be dropped, this
+    hands to the conic multiplier, so removing one is :func:`deactivate_cones`'s decision
+    and not a numerical repair. When the dependency lies entirely among rows that cannot be dropped, this
     returns the set unchanged and the caller falls back to regularization -- which is
     exactly why §8.3 lists both.
 
@@ -353,3 +358,75 @@ def drop_dependent_rows(
     for index in droppable:
         updated = drop_inequality(updated, index)
     return updated, tuple(droppable)
+
+
+def deactivate_cones(
+    problem: SOCP,
+    working_set: WorkingSet,
+    multipliers: Multipliers,
+    *,
+    tolerance: float = MULTIPLIER_TOLERANCE,
+) -> tuple[WorkingSet, tuple[int, ...]]:
+    """Turn cones off, on the multiplier rather than the geometry -- §7.4.
+
+    §7.4 (``paper.tex:609``) asks for the conic KKT multiplier and the normal-cone
+    conditions to "determine whether the cone contributes a genuine active normal at the
+    candidate solution", and that phrase decomposes into exactly two ways a factor can fail
+    to contribute one:
+
+    * **The normal points the wrong way.** Dual feasibility asks ``w in Q``, and
+      :func:`cosa.active_set.multipliers.dual_cone_violation` measures the failure. A
+      violating factor is not merely uninformative -- it is being held in a direction the
+      problem does not want held, exactly as a wrong-signed ``y`` is in §7.2, and the
+      response is the same: drop it.
+    * **There is no normal.** ``w = 0`` satisfies ``w in Q`` and contributes nothing to
+      stationarity, so the cone is doing no work. Keeping it costs a row in ``W`` that
+      constrains the direction for no reason; releasing it lets the next direction move off
+      the boundary if that is where the objective goes, and re-activation is one geometric
+      test away if it is not.
+
+    **Why this is one rule and not two.** Both are the statement ``w`` is not a nonzero
+    element of ``Q``, which is to say ``w`` is not in the interior of the normal cone. §8.1
+    (``paper.tex:644``) makes the same point in the other direction, and the two shapes the
+    test takes -- a scalar at a tangent factor, a cone membership at an apex factor -- are
+    the module docstring of :mod:`cosa.active_set.multipliers`, not a branch here. This
+    function asks one question and the shape of the answer follows the status.
+
+    **What it is emphatically not.** It is not "the slack grew, so turn the cone off". That
+    rule is what makes an active-set method cycle: an iterate a hair off the boundary
+    deactivates, the unconstrained direction walks straight back, and the factor reactivates
+    forever. The multiplier is the quantity that knows whether the constraint is *wanted*,
+    and this is why §7.4 insists on it.
+
+    **The apex is the case with teeth.** At an apex factor ``w`` is a whole block and the
+    test is a genuine cone membership. #24 established that on eq. (7) a released apex is
+    arithmetically unreachable -- the head row pins ``t`` -- so a factor that fails this
+    test at the apex is a real finding rather than a routine drop, and
+    :func:`cosa.solver.apex.is_apex_optimal` is the other half of the answer.
+
+    Args:
+        problem: the instance, for its cone product.
+        working_set: the current set.
+        multipliers: the multipliers at the current point, ordinarily the ones
+            :func:`cosa.active_set.multipliers.from_direction` just produced.
+        tolerance: how large a dual violation, and how large a multiplier, count as zero.
+            The multiplier tolerance rather than the activation one: this is a judgement
+            about a dual quantity, and it shares its scale with §7.2's.
+
+    Returns:
+        The updated set, and the factors that were turned off, in factor order. An empty
+        tuple means every active factor earned its place.
+    """
+    violations = dual_cone_violation(problem, multipliers)
+    blocks = problem.cone.blocks(_vector("w", multipliers.w, size=problem.cone.dim))
+    updated = working_set
+    dropped: list[int] = []
+    for index, status in enumerate(working_set.cone_status):
+        if not status.is_active:
+            continue
+        infeasible = violations[index] > tolerance
+        absent = float(np.abs(blocks[index]).max(initial=0.0)) <= tolerance
+        if infeasible or absent:
+            updated = set_cone_status(updated, index, ConeStatus.INACTIVE)
+            dropped.append(index)
+    return updated, tuple(dropped)

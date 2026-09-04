@@ -46,6 +46,14 @@ the inequality removal rule is :func:`cosa.active_set.updates.removal_candidate`
 rather than reimplemented: this module's job is to produce a ``y``, not to have a second
 opinion about what a wrong-signed one means.
 
+**The multipliers are also an input, not only an output.** #23 puts them back into the
+*primal* computation: the direction subproblem's matrix is the Hessian of the Lagrangian,
+``rho*I + sum_j mu_j * grad^2 g_j``, and the ``mu_j`` are these multipliers. That coupling
+is the whole of what "primal-dual" means in §3.3 (``paper.tex:301``) -- not that duals are
+computed alongside primals, which any active-set method does, but that the dual variables
+determine the primal step. :func:`lagrangian_curvature` is that term, and its derivation is
+in its docstring.
+
 **Level 2 is what this module is measured against.** §14.2 (``paper.tex:1028``) asks that
 "the computed multipliers satisfy the stationarity equations to within a prescribed
 tolerance", and :meth:`Multipliers.stationarity_error` is that number.
@@ -60,11 +68,11 @@ import numpy as np
 
 from cosa.active_set.working_set import ConeStatus, WorkingSet
 from cosa.geometry.soc import TOLERANCE, slack
-from cosa.geometry.tangent import tangent_covector
+from cosa.geometry.tangent import curvature, tangent_covector
 from cosa.problem.socp import SIGN_CONVENTION, ProblemError, _vector
 
 if TYPE_CHECKING:
-    from cosa import Vector
+    from cosa import Matrix, Vector
     from cosa.linear_algebra.kkt import Direction
     from cosa.problem.socp import SOCP
 
@@ -74,6 +82,7 @@ __all__ = [
     "dual_cone_violation",
     "from_direction",
     "is_dual_feasible",
+    "lagrangian_curvature",
 ]
 
 STATIONARITY_TOLERANCE: Final = 1e-8
@@ -293,3 +302,82 @@ def is_dual_feasible(
     if multipliers.inequality_violation(tolerance=tolerance) > 0.0:
         return False
     return max(dual_cone_violation(problem, multipliers), default=0.0) <= tolerance
+
+
+def lagrangian_curvature(
+    problem: SOCP,
+    working_set: WorkingSet,
+    z: Vector,
+    multipliers: Multipliers,
+    *,
+    tolerance: float = TOLERANCE,
+) -> Matrix:
+    """The conic constraints' contribution to the Hessian of the Lagrangian.
+
+    **Why there is one at all.** The SOCP's objective is linear, so ``grad^2 f`` is zero and
+    it is tempting to conclude the Lagrangian has no curvature either. It does: the *cone*
+    is curved. Writing the active factor as the scalar constraint
+
+        g(z) = ||s_1|| - s_0 <= 0,      s = G_block @ z + h_block
+
+    the Lagrangian is ``c.T @ z + ... + sum_j mu_j * g_j(z)`` and its Hessian is
+    ``sum_j mu_j * G_j.T @ grad^2 g_j @ G_j``, with ``grad^2 g_j`` the boundary's second
+    derivative that :func:`cosa.geometry.tangent.curvature` supplies. A direction subproblem
+    built on ``rho*I`` alone knows only the tangent *plane* and so takes a step along a
+    straight line that immediately leaves a curved surface; one built on this knows which
+    way the surface bends away and how fast.
+
+    **Where ``mu`` comes from.** Matching ``mu * grad g = -mu * G.T @ covector`` against the
+    convention's ``-G.T @ w`` gives ``w = mu * covector``, and ``covector``'s head is ``1``,
+    so ``mu`` is simply ``w``'s head. No new quantity is introduced and no sign is
+    re-derived: the multiplier this needs is a component of the one
+    :func:`from_direction` already produces.
+
+    **It cannot make the subproblem non-convex**, which is the usual hazard of a Lagrangian
+    Hessian and is not one here. ``grad^2 g`` is positive semidefinite because ``g`` is
+    convex, and ``mu`` is non-negative whenever the multipliers are dual feasible -- so the
+    sum is a positive semidefinite matrix added to ``rho*I``, and the subproblem keeps its
+    unique solution. A *dual infeasible* ``mu`` could break that, which is why a negative
+    head is clipped rather than trusted: a factor whose multiplier has the wrong sign is one
+    :func:`cosa.active_set.updates.deactivate_cones` is about to remove, and it should not
+    be allowed to bend the direction on its way out.
+
+    **Apex factors contribute nothing.** ``g`` is not differentiable at the apex, so there
+    is no ``grad^2 g`` to weight -- the curvature there is infinite in every turning
+    direction, which is the geometric content of #24 needing its own branch. Returning zero
+    for those factors is not an approximation; it is the statement that this term is not the
+    right local description there, and that the apex branch is.
+
+    Args:
+        problem: the instance.
+        working_set: what is currently believed active.
+        z: the current point, whose slack supplies each active factor's ``u``.
+        multipliers: the multipliers to weight the curvature by, ordinarily the previous
+            iterate's -- the direction needs them before it can produce them, and using the
+            last available ones is what makes the scheme a fixed-point iteration rather than
+            an implicit one.
+        tolerance: the vanishing-tail tolerance.
+
+    Returns:
+        The ``(n, n)`` symmetric positive semidefinite matrix to add to ``rho*I``. All zeros
+        when no factor is tangent, when every ``mu`` is zero, or at an apex-only working
+        set -- in which case the subproblem is exactly the one Waves 4-6 solved.
+
+    Raises:
+        ProblemError: if the working set's shape does not match the problem's.
+    """
+    if working_set.num_inequalities != problem.num_inequalities or working_set.cone != problem.cone:
+        raise ProblemError("shape", "the working set and the problem describe different instances")
+    total = np.zeros((problem.num_variables, problem.num_variables))
+    conic = problem.cone_slack(_vector("z", z, size=problem.num_variables))
+    blocks = problem.cone.blocks(_vector("w", multipliers.w, size=problem.cone.dim))
+    for factor, status in enumerate(working_set.cone_status):
+        if status is not ConeStatus.TANGENT:
+            continue
+        weight = max(0.0, float(blocks[factor][0]))
+        if weight == 0.0:
+            continue
+        span = problem.cone.slices[factor]
+        rows = problem.G[span]
+        total += weight * (rows.T @ curvature(conic[span], tolerance=tolerance) @ rows)
+    return total

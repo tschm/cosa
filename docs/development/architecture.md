@@ -212,6 +212,38 @@ stays where it is: its instance families, its random specifications and its
 reference-solver oracle are how the library is exercised, not part of what it offers, and
 a `cosa.PortfolioInstance` would suggest otherwise.
 
+## `H` is not `rho*I`
+
+§4.2 writes the direction subproblem's matrix as `H = rho*I`, and Waves 4–6 used exactly
+that. [#23](https://github.com/tschm/cosa/issues/23) replaces it with the Hessian of the
+Lagrangian, `rho*I + sum_j mu_j * grad^2 g_j`, where `g_j` is the `j`-th cone constraint
+and `mu_j` its multiplier. Three consequences are worth stating where they can be found.
+
+**Where the second derivative lives.** In `geometry/tangent.py`, next to the first one,
+rather than in a `geometry/curvature.py` of its own. Both are the local geometry of the
+same object at the same point, both refuse the apex for the same reason, and splitting
+them would mean two modules that must agree about what `u` is. The module is named for
+what it was first used for, not for the whole of what it holds.
+
+**Why this is not "an SQP method with an SOC constraint",** which §3.3 explicitly warns
+against. An SQP method would linearize the conic constraint into a *general* nonlinear
+program and hand the result to a QP solver. What happens here is narrower: the constraint
+stays a cone, the working set stays conic — a factor is `INACTIVE`, `TANGENT` or `APEX`,
+never a row of a linearized system — and the curvature is exact rather than an
+approximation to a Hessian nobody can write down. The Lagrangian Hessian is how a
+*multiplier* enters a *primal* computation, and that coupling is what "primal-dual" names.
+
+**What it costs and what it buys.** It costs one `n × n` symmetric update per iteration,
+formed from a matrix the assembly already has, and nothing in the factorization: the
+`(1, 1)` block was dense before and is dense after. Across the eleven portfolio families
+it roughly halves the iteration count, and on the `ill_conditioned` family it is the
+difference between an answer and the iteration limit. The measurement is
+`tests/test_conic_logic.py`.
+
+The multipliers it needs are the previous iteration's, which makes the scheme a fixed
+point rather than an implicit system. The first iteration uses zero, so a #23 solve and a
+Wave 6 solve begin identically and every difference between them is attributable.
+
 ## The other decision recorded once
 
 The sign convention for the conic KKT conditions lives on

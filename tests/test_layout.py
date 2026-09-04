@@ -57,8 +57,11 @@ PUBLIC_SURFACE = [
 # a name like `slack` or `position` only means something next to its module.
 NOT_AT_THE_ROOT = [
     "covariance_factor",
+    "curvature",
+    "deactivate_cones",
     "equilibrate",
     "is_boundary",
+    "lagrangian_curvature",
     "position",
     "positions",
     "removal_candidate",

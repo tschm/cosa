@@ -56,7 +56,7 @@ import numpy as np
 from cosa.active_set.working_set import ConeStatus, WorkingSet
 from cosa.geometry.soc import TOLERANCE
 from cosa.geometry.tangent import tangent_row
-from cosa.problem.socp import ProblemError, _vector
+from cosa.problem.socp import ProblemError, _matrix, _vector
 
 if TYPE_CHECKING:
     from cosa import Matrix, Vector
@@ -327,6 +327,7 @@ def assemble(
     rho: float = RHO,
     tolerance: float = TOLERANCE,
     regularization: float = 0.0,
+    curvature: Matrix | None = None,
 ) -> KktSystem:
     """Build the system of §4.3 for the current working set and point.
 
@@ -346,6 +347,15 @@ def assemble(
             dependent working set solvable, at the price of an answer to a nearby question,
             whereas ``rho`` perturbs nothing. Zero leaves the system exactly as §4.3 prints
             it. See #25.
+        curvature: an optional symmetric positive semidefinite ``(n, n)`` matrix added to
+            ``rho*I`` in the ``(1, 1)`` block, making that block the Hessian of the
+            Lagrangian rather than a pure regularizer. §4.2 writes ``H = rho*I`` and Waves
+            4-6 used exactly that; #23 supplies
+            :func:`cosa.active_set.multipliers.lagrangian_curvature` here instead, which is
+            what turns a tangent-plane step into one that accounts for how the cone bends.
+            ``None`` is ``rho*I``, unchanged. Definiteness is not verified here -- the
+            caller that builds the term is the one that can cheaply guarantee it, and
+            :func:`solve` reports a singular system if the guarantee is broken.
 
     Returns:
         The assembled system.
@@ -362,6 +372,8 @@ def assemble(
     rows, variables = matrix_w.shape
     matrix = np.zeros((variables + rows, variables + rows))
     matrix[:variables, :variables] = rho * np.eye(variables)
+    if curvature is not None:
+        matrix[:variables, :variables] += _matrix("curvature", curvature, rows=variables, columns=variables)
     matrix[:variables, variables:] = matrix_w.T
     matrix[variables:, :variables] = matrix_w
     if regularization:
@@ -487,6 +499,7 @@ def direction(
     tolerance: float = TOLERANCE,
     rank_tolerance: float | None = None,
     regularization: float = 0.0,
+    curvature: Matrix | None = None,
 ) -> Direction:
     """Assemble and solve in one call -- what step 5 of the §4.1 iteration does.
 
@@ -499,6 +512,7 @@ def direction(
         rank_tolerance: the singular-value threshold for the dependent-row check.
         regularization: §8.3's ``delta``. A positive value makes a dependent working set
             solvable instead of refused -- see :func:`assemble`.
+        curvature: the Lagrangian's conic curvature term, or ``None`` for ``H = rho*I``.
 
     Returns:
         The direction and its multipliers.
@@ -507,7 +521,15 @@ def direction(
         SingularKktError: if the working-set rows are linearly dependent and no
             regularization was asked for.
     """
-    system = assemble(problem, working_set, z, rho=rho, tolerance=tolerance, regularization=regularization)
+    system = assemble(
+        problem,
+        working_set,
+        z,
+        rho=rho,
+        tolerance=tolerance,
+        regularization=regularization,
+        curvature=curvature,
+    )
     return solve(system, rank_tolerance=rank_tolerance)
 
 

@@ -57,6 +57,7 @@ PUBLIC_SURFACE = [
 # a name like `slack` or `position` only means something next to its module.
 NOT_AT_THE_ROOT = [
     "Factorization",
+    "WarmStart",
     "Guard",
     "Reuse",
     "covariance_factor",
@@ -70,6 +71,7 @@ NOT_AT_THE_ROOT = [
     "lexicographic_candidate",
     "objective_of",
     "removal_candidate",
+    "seed",
     "slack",
     "tangent_row",
     "working_set_matrix",
@@ -84,10 +86,13 @@ NOT_AT_THE_ROOT = [
 # The other half of the rule: `cosa.experiments` is the harness that exercises the
 # library, not part of what the library offers, so none of it reaches the root either.
 NOT_THE_LIBRARY = [
+    "Ablation",
     "CrossCheck",
     "CvxpySolver",
     "PortfolioInstance",
     "RandomSpec",
+    "Outcome",
+    "ablate",
     "cross_check",
     "random_instance",
     "solve_reference",

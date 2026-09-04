@@ -294,6 +294,10 @@ class KktSystem:
         gradient: ``g_k``, the objective gradient, ``(n,)``.
         rho: the ``rho`` of ``H = rho*I``.
         layout: the row order of ``W``.
+        regularization: the ``delta`` of §8.3 the system was assembled with, zero for an
+            unregularized one. Recorded because a solution obtained from a regularized
+            system answers a nearby question, and a consumer comparing two solutions needs
+            to know which.
     """
 
     matrix: Matrix
@@ -302,6 +306,7 @@ class KktSystem:
     gradient: Vector
     rho: float
     layout: RowLayout
+    regularization: float = 0.0
 
     @property
     def num_variables(self) -> int:
@@ -321,6 +326,7 @@ def assemble(
     *,
     rho: float = RHO,
     tolerance: float = TOLERANCE,
+    regularization: float = 0.0,
 ) -> KktSystem:
     """Build the system of §4.3 for the current working set and point.
 
@@ -335,6 +341,11 @@ def assemble(
         z: the current point.
         rho: the ``rho`` of ``H = rho*I``, which must be positive.
         tolerance: the vanishing-tail tolerance passed to the tangent rows.
+        regularization: ``delta``, placed as ``-delta*I`` in the ``(2, 2)`` block. §8.3's
+            regularization, and **not** ``rho``: this one perturbs the problem to make a
+            dependent working set solvable, at the price of an answer to a nearby question,
+            whereas ``rho`` perturbs nothing. Zero leaves the system exactly as §4.3 prints
+            it. See #25.
 
     Returns:
         The assembled system.
@@ -345,12 +356,16 @@ def assemble(
     """
     if not np.isfinite(rho) or rho <= 0.0:
         raise ProblemError("rho", f"§4.2 takes rho > 0, found {rho}")
+    if not np.isfinite(regularization) or regularization < 0.0:
+        raise ProblemError("regularization", f"§8.3 takes delta >= 0, found {regularization}")
     matrix_w = working_set_matrix(problem, working_set, z, tolerance=tolerance)
     rows, variables = matrix_w.shape
     matrix = np.zeros((variables + rows, variables + rows))
     matrix[:variables, :variables] = rho * np.eye(variables)
     matrix[:variables, variables:] = matrix_w.T
     matrix[variables:, :variables] = matrix_w
+    if regularization:
+        matrix[variables:, variables:] = -regularization * np.eye(rows)
     rhs = np.concatenate([-problem.c, np.zeros(rows)])
     return KktSystem(
         matrix=matrix,
@@ -359,6 +374,7 @@ def assemble(
         gradient=problem.c,
         rho=float(rho),
         layout=RowLayout.for_working_set(working_set),
+        regularization=float(regularization),
     )
 
 
@@ -440,7 +456,14 @@ def solve(system: KktSystem, *, rank_tolerance: float | None = None) -> Directio
     Raises:
         SingularKktError: if ``W`` has linearly dependent rows.
     """
-    if system.num_rows and int(np.linalg.matrix_rank(system.W, tol=rank_tolerance)) < system.num_rows:
+    # A regularized system is nonsingular by construction, so the rank test is skipped:
+    # a caller that asked for regularization has already decided to accept a nearby answer
+    # rather than a refusal, and refusing anyway would make the option useless.
+    if (
+        not system.regularization
+        and system.num_rows
+        and int(np.linalg.matrix_rank(system.W, tol=rank_tolerance)) < system.num_rows
+    ):
         raise SingularKktError(system.num_rows, system.num_variables)
     try:
         solution = np.linalg.solve(system.matrix, system.rhs)
@@ -463,6 +486,7 @@ def direction(
     rho: float = RHO,
     tolerance: float = TOLERANCE,
     rank_tolerance: float | None = None,
+    regularization: float = 0.0,
 ) -> Direction:
     """Assemble and solve in one call -- what step 5 of the §4.1 iteration does.
 
@@ -473,14 +497,17 @@ def direction(
         rho: the ``rho`` of ``H = rho*I``.
         tolerance: the vanishing-tail tolerance passed to the tangent rows.
         rank_tolerance: the singular-value threshold for the dependent-row check.
+        regularization: §8.3's ``delta``. A positive value makes a dependent working set
+            solvable instead of refused -- see :func:`assemble`.
 
     Returns:
         The direction and its multipliers.
 
     Raises:
-        SingularKktError: if the working-set rows are linearly dependent.
+        SingularKktError: if the working-set rows are linearly dependent and no
+            regularization was asked for.
     """
-    system = assemble(problem, working_set, z, rho=rho, tolerance=tolerance)
+    system = assemble(problem, working_set, z, rho=rho, tolerance=tolerance, regularization=regularization)
     return solve(system, rank_tolerance=rank_tolerance)
 
 

@@ -232,6 +232,7 @@ class Recorder:
         self._cone_changes = 0
         self._factorizations = 0
         self._revisits = 0
+        self._started: float | None = None
         self._kkt_solves = 0
         self._runtime = 0.0
         self._factorization_time = 0.0
@@ -248,11 +249,12 @@ class Recorder:
         started_tracing = self._track_memory and not tracemalloc.is_tracing()
         if started_tracing:
             tracemalloc.start()
-        start = time.perf_counter()
+        self._started = time.perf_counter()
         try:
             yield self
         finally:
-            self._runtime += time.perf_counter() - start
+            self._runtime += time.perf_counter() - self._started
+            self._started = None
             if self._track_memory:
                 self._peak_memory = tracemalloc.get_traced_memory()[1]
                 if started_tracing:
@@ -322,6 +324,37 @@ class Recorder:
         """Count one active-set iteration."""
         self._iterations += 1
 
+    def _elapsed(self) -> float:
+        """Total seconds spent solving, including a solve still in progress.
+
+        The subtlety this exists for: :func:`cosa.solve` builds its :class:`Solution` --
+        and so calls :meth:`metrics` -- from *inside* the ``with recorder.solving()`` block,
+        so a runtime recorded only in that block's ``finally`` is always zero by the time
+        anybody reads it. It was, for four waves. §11 asks for total runtime and #34's study
+        is the first consumer that would have noticed, which is result 9 of #43 once more:
+        the number was wrong from the day it was added and nothing had a reason to look.
+
+        Returns:
+            Seconds, including the in-progress interval when one is open.
+        """
+        running = 0.0 if self._started is None else time.perf_counter() - self._started
+        return self._runtime + running
+
+    def _peak(self) -> int | None:
+        """Peak bytes allocated, sampled live when tracing is still open.
+
+        Same reason as :meth:`_elapsed`: the value latched in ``solving()``'s ``finally`` is
+        not yet set when the solution is built.
+
+        Returns:
+            The peak, or ``None`` when memory was not tracked.
+        """
+        if not self._track_memory:
+            return None
+        if self._started is not None and tracemalloc.is_tracing():
+            return tracemalloc.get_traced_memory()[1]
+        return self._peak_memory
+
     def working_set_seen(self, visits: int) -> None:
         """Record how often the working set now in force has been reached.
 
@@ -377,10 +410,10 @@ class Recorder:
             factorizations=self._factorizations,
             working_set_revisits=self._revisits,
             kkt_solves=self._kkt_solves,
-            runtime=self._runtime,
+            runtime=self._elapsed(),
             factorization_time=self._factorization_time,
             kkt_residual=self._residual,
-            peak_memory=self._peak_memory,
+            peak_memory=self._peak(),
         )
 
 

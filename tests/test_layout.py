@@ -87,15 +87,22 @@ NOT_AT_THE_ROOT = [
 # library, not part of what the library offers, so none of it reaches the root either.
 NOT_THE_LIBRARY = [
     "Ablation",
+    "Accuracy",
+    "Comparison",
+    "Frontier",
+    "Performance",
+    "Point",
     "CrossCheck",
     "CvxpySolver",
     "PortfolioInstance",
     "RandomSpec",
     "Outcome",
     "ablate",
+    "benchmark",
     "cross_check",
     "random_instance",
     "solve_reference",
+    "sweep",
 ]
 
 

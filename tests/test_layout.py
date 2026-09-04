@@ -56,6 +56,9 @@ PUBLIC_SURFACE = [
 # `cosa.geometry.soc.is_boundary` or `cosa.active_set.updates.removal_candidate`, because
 # a name like `slack` or `position` only means something next to its module.
 NOT_AT_THE_ROOT = [
+    "Factorization",
+    "Guard",
+    "Reuse",
     "covariance_factor",
     "curvature",
     "deactivate_cones",
@@ -64,6 +67,8 @@ NOT_AT_THE_ROOT = [
     "lagrangian_curvature",
     "position",
     "positions",
+    "lexicographic_candidate",
+    "objective_of",
     "removal_candidate",
     "slack",
     "tangent_row",

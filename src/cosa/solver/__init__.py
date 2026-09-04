@@ -1,6 +1,9 @@
 """The solver: one iteration is working set, direction, step, multipliers, update.
 
 Modules (each owned by its own issue):
+    anticycling: §17.2's remedies -- Bland's rule, the guard that arms it, and the merit
+        safeguard -- plus the no-progress rule that turned out to be what the loop actually
+        needed. Landed.
     apex: The branch at ``L @ x = 0``, where §8.1 replaces the tangent hyperplane with
         exact membership and normal-cone conditions. Landed.
     instrumentation: The counters §11 and §12.3 promise to measure, and the per-iterate

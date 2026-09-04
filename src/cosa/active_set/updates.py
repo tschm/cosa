@@ -35,15 +35,28 @@ multiplies by ``SIGN_CONVENTION.inequality`` instead of hard-coding the directio
 test. Flip the convention and this rule follows it; write the ``< 0`` out by hand here and
 the two silently disagree, which is the failure mode #9 exists to prevent.
 
-**Two tolerances, and they are not the geometry tolerance.**
-:data:`ACTIVATION_TOLERANCE` decides when a constraint counts as reached and when a cone
-counts as active -- §7.3's ``eps_act``. :data:`MULTIPLIER_TOLERANCE` decides when a
-multiplier counts as wrong-signed. Both are algorithmic and coarse, and both are
-deliberately looser than :data:`cosa.geometry.soc.TOLERANCE`, which only asks what a point
-*is*. The separate activation and deactivation thresholds of §8.2 -- the hysteresis
-``eps_on < eps_off`` that stops a nearly active cone oscillating -- are a further
-refinement owned by #29; a single symmetric threshold is what §7 asks for and what is
-here.
+**Three tolerances, and none of them is the geometry tolerance.**
+:data:`ACTIVATION_TOLERANCE` is §7.3's ``eps_act`` and §8.2's ``eps_on``: it decides when a
+constraint counts as reached and when a cone counts as active.
+:data:`DEACTIVATION_TOLERANCE` is §8.2's ``eps_off``, the looser threshold beyond which a
+factor is *demonstrably* interior. :data:`MULTIPLIER_TOLERANCE` decides when a multiplier
+counts as wrong-signed. All three are algorithmic and coarse, and all three are deliberately
+looser than :data:`cosa.geometry.soc.TOLERANCE`, which only asks what a point *is*.
+
+**The hysteresis, and why it is not two rules.** §8.2 (``paper.tex:648``) asks for
+``eps_on < eps_off`` so that "numerical tolerances" cannot "lead to oscillation between
+active and inactive states". The band between them is a dead zone: a factor inside it keeps
+whatever status it has, so an iterate drifting back and forth across a single threshold
+changes nothing. :func:`activate_cones` turns a factor on below ``eps_on`` and
+:func:`deactivate_cones` will turn one off above ``eps_off``, and between the two nothing
+happens.
+
+That the geometric release clause is *implied* rather than added is worth stating.
+Complementarity requires ``w . s = 0`` with both ``w`` and ``s`` in ``Q``; at a strictly
+interior ``s`` that forces ``w = 0``, which is already the "no active normal" half of §7.4's
+test. So ``eps_off`` is not a second rule competing with the multiplier -- it is the
+tolerance at which the slack is called strictly interior, and the multiplier condition it
+implies is one the rule was already checking.
 """
 
 from __future__ import annotations
@@ -56,6 +69,7 @@ import numpy as np
 from cosa.active_set.multipliers import Multipliers, dual_cone_violation
 from cosa.active_set.working_set import ConeStatus, WorkingSet
 from cosa.geometry.soc import ConePosition, positions
+from cosa.geometry.soc import slack as cone_slack
 from cosa.problem.socp import SIGN_CONVENTION, ProblemError, _vector
 
 if TYPE_CHECKING:
@@ -64,6 +78,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "ACTIVATION_TOLERANCE",
+    "DEACTIVATION_TOLERANCE",
     "MULTIPLIER_TOLERANCE",
     "activate_cones",
     "activation_candidates",
@@ -76,6 +91,16 @@ __all__ = [
     "removal_candidate",
     "set_cone_status",
 ]
+
+DEACTIVATION_TOLERANCE: Final = 1e-6
+"""§8.2's ``eps_off``: the slack above which a cone factor is demonstrably interior.
+
+A hundred times :data:`ACTIVATION_TOLERANCE`, which is ``eps_on``. The ratio is what makes
+the hysteresis work rather than the absolute values: a factor must close to within ``eps_on``
+to be turned on and open to beyond ``eps_off`` to be turned off, so an iterate oscillating by
+less than the gap between them changes nothing. A ratio of one is no hysteresis at all and is
+what #29's regression instance runs with to show the cycle.
+"""
 
 ACTIVATION_TOLERANCE: Final = 1e-8
 """How close to its boundary a constraint must be to count as reached -- §7.3's eps_act."""
@@ -366,8 +391,10 @@ def deactivate_cones(
     multipliers: Multipliers,
     *,
     tolerance: float = MULTIPLIER_TOLERANCE,
+    z: Vector | None = None,
+    hysteresis: float = DEACTIVATION_TOLERANCE,
 ) -> tuple[WorkingSet, tuple[int, ...]]:
-    """Turn cones off, on the multiplier rather than the geometry -- §7.4.
+    """Turn cones off, on the multiplier rather than the geometry -- §7.4, with §8.2's band.
 
     §7.4 (``paper.tex:609``) asks for the conic KKT multiplier and the normal-cone
     conditions to "determine whether the cone contributes a genuine active normal at the
@@ -412,6 +439,14 @@ def deactivate_cones(
         tolerance: how large a dual violation, and how large a multiplier, count as zero.
             The multiplier tolerance rather than the activation one: this is a judgement
             about a dual quantity, and it shares its scale with §7.2's.
+        z: the current point, or ``None`` to skip §8.2's geometric clause. Supplying it lets
+            a factor whose slack has left the hysteresis band be released on that ground --
+            which complementarity says is the same ground, since a strictly interior slack
+            forces ``w = 0``, but which is testable from the primal side without waiting for
+            the multiplier to become exactly zero in floating point.
+        hysteresis: §8.2's ``eps_off``. A factor whose slack exceeds it is demonstrably
+            interior; one below it keeps whatever status it has, which is the dead band that
+            stops the oscillation §8.2 warns about.
 
     Returns:
         The updated set, and the factors that were turned off, in factor order. An empty
@@ -419,6 +454,7 @@ def deactivate_cones(
     """
     violations = dual_cone_violation(problem, multipliers)
     blocks = problem.cone.blocks(_vector("w", multipliers.w, size=problem.cone.dim))
+    slacks = None if z is None else problem.cone.blocks(problem.cone_slack(_vector("z", z, size=problem.num_variables)))
     updated = working_set
     dropped: list[int] = []
     for index, status in enumerate(working_set.cone_status):
@@ -426,7 +462,8 @@ def deactivate_cones(
             continue
         infeasible = violations[index] > tolerance
         absent = float(np.abs(blocks[index]).max(initial=0.0)) <= tolerance
-        if infeasible or absent:
+        interior = slacks is not None and cone_slack(slacks[index]) > hysteresis
+        if infeasible or absent or interior:
             updated = set_cone_status(updated, index, ConeStatus.INACTIVE)
             dropped.append(index)
     return updated, tuple(dropped)

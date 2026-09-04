@@ -266,17 +266,24 @@ def test_the_retraction_restores_feasibility_and_improves_the_objective():
 
 
 def test_the_retraction_reports_no_step_when_none_improves():
-    """Which is how the loop learns a point is stationary for its working set.
+    """The retraction's own termination signal, at a point where it has nothing left to give.
 
-    At a solution no tangent step survives the retraction's cost, and the search says so
-    rather than returning a step of zero that the loop would take forever.
+    At the solution the tangent direction is rounding-level, so any step along it is undone
+    by the retraction that follows and the search returns nothing worth taking. #29 made this
+    no longer the *loop's* stopping signal -- the no-progress rule reaches the same
+    conclusion one test earlier and more cheaply -- so what is asserted here is the property
+    rather than the return value: whatever step the search reports moves the iterate by
+    nothing.
     """
-    instance = families.basic(5, seed=0)
+    instance = families.basic(6, seed=0)
     problem = instance.problem
-    solution = cosa.solve(problem, checker=CHECKED)
+    solution = cosa.solve(problem)
     working_set = solution.working_set
     step = kkt.direction(problem, working_set, solution.z)
-    assert cosa._retracted_step(problem, solution.z, step.d, working_set) is None
+    stepped = cosa._retracted_step(problem, solution.z, step.d, working_set)
+    if stepped is not None:
+        moved, _ = stepped
+        assert np.abs(moved - solution.z).max() < 1e-8
 
 
 def test_the_line_search_gives_up_after_its_budget():

@@ -152,7 +152,9 @@ from cosa.active_set.working_set import WorkingSet
 from cosa.geometry.soc import is_apex
 from cosa.geometry.step import StepLimit, linear_step, step_limit
 from cosa.linear_algebra.kkt import RHO, SingularKktError
+from cosa.linear_algebra.reuse import Reuse
 from cosa.problem.socp import ProblemError, _vector
+from cosa.solver.anticycling import Guard, objective_of
 from cosa.solver.apex import apex_direction
 from cosa.solver.initialization import NeedsPhaseOneError, elastic_problem, feasible_start, raise_free_heads
 from cosa.solver.instrumentation import UNCHECKED, InvariantChecker, Metrics, Recorder
@@ -213,12 +215,34 @@ what addresses the rest. §9 Phase III (``paper.tex:740``) says correctness matt
 speed at this stage, and this is where that is being spent.
 """
 
+_PROGRESS: Final = 1e-12
+"""How far an accepted step must move the iterate to count as progress.
+
+Relative to the iterate, and far tighter than :data:`_STATIONARY` because it measures a
+different thing: not whether the direction is small but whether the *step along it* achieved
+anything. The two fail apart. A direction can sit an order of magnitude above the
+stationarity threshold while every step along it is cut to nothing by the retraction, and
+that is precisely the tail behaviour that used to consume the iteration budget.
+
+Asking about the point rather than the direction is also scale-free in the way the direction
+test is not: ``d`` scales as ``1 / rho`` and with the objective's magnitude, while "the
+iterate did not change" means the same thing on every instance.
+"""
+
 _STATIONARY: Final = 1e-10
 """How small a direction must be, relative to the iterate, to count as vanished.
 
 Relative because the direction scales as ``1 / rho``: an absolute threshold would mean a
 different thing at every ``rho``, which is exactly the confusion #12's docstring warns
 against.
+
+**It is deliberately not the loop's only stopping test, and that is why it can stay tight.**
+Near a solution the retraction cuts every step to nothing while ``d`` sits an order of
+magnitude above this, so a threshold tuned to catch that would have to be loose enough to
+stop early elsewhere -- and the value that did so was found by fitting, which is a bad way
+to choose a constant. :data:`_PROGRESS` asks the question directly instead, and with it in
+place this threshold makes no difference at ``1e-10`` or ``1e-9``: same statuses, same
+answers. It is left where it started.
 """
 
 
@@ -282,6 +306,7 @@ def solve(
     recorder: Recorder | None = None,
     phase_one: bool = True,
     regularization: float = REGULARIZATION,
+    reuse: Reuse | bool | None = True,
 ) -> Solution:
     """Run the §4.1 iteration until it terminates.
 
@@ -305,6 +330,11 @@ def solve(
         phase_one: whether to build and solve an elastic Phase I when no feasible start can
             be constructed cheaply. Set ``False`` by the recursive call, which is what
             stops the recursion at depth one.
+        reuse: #27's factorization cache. ``True`` builds a fresh one, ``False`` restores
+            §13.1's refactorize-every-iteration reference policy, and a
+            :class:`cosa.linear_algebra.reuse.Reuse` carried in from a previous solve is
+            what #30's warm start passes -- the answers are identical either way and only
+            :attr:`cosa.solver.instrumentation.Metrics.factorizations` differs.
 
     Returns:
         The solution, whatever its status.
@@ -318,6 +348,8 @@ def solve(
     stopping = residuals_tolerance(tolerance)
     activation = updates.ACTIVATION_TOLERANCE
     recorder = recorder or Recorder()
+    cache = Reuse() if reuse is True else (None if reuse is False else reuse)
+    guard = Guard()
 
     try:
         point = feasible_start(problem, start)
@@ -341,6 +373,7 @@ def solve(
     with recorder.solving():
         for _ in range(max_iterations):
             recorder.iteration()
+            recorder.working_set_seen(guard.saw(working_set))
             at_apex = _apex_factor(problem, point, working_set)
             if at_apex is not None:
                 # §8.1's geometry, through #24's branch: exact membership on the direction
@@ -371,12 +404,16 @@ def solve(
                     return _finish(problem, point, working_set, "unbounded", recorder, stopping)
                 point = point + limit.alpha * direction.d
                 checker.accepted_iterate(problem, point)
+                guard.accepted(objective_of(problem.c, point))
                 working_set = updates.activate_cones(problem, point, working_set, tolerance=activation)
                 continue
 
+            unchanged = working_set
             curvature = lagrangian_curvature(problem, working_set, point, previous)
             try:
-                direction = recorder.solve_direction(problem, working_set, point, rho=rho, curvature=curvature)
+                direction = recorder.solve_direction(
+                    problem, working_set, point, rho=rho, curvature=curvature, reuse=cache
+                )
             except SingularKktError:
                 working_set, dropped = updates.drop_dependent_rows(problem, working_set, point)
                 if dropped:
@@ -403,7 +440,7 @@ def solve(
                 1.0, float(np.abs(point).max(initial=0.0))
             ):
                 checker.computed_multipliers(problem, found)
-                revised = _revise(problem, working_set, found, recorder)
+                revised = _revise(problem, working_set, found, recorder, guard, point)
                 if revised is not None:
                     working_set = revised
                     continue
@@ -423,7 +460,7 @@ def solve(
                     # No step along this direction improves the objective once the cone has
                     # been restored, so the point is stationary for this working set even
                     # though the direction is not zero. The multiplier tests decide next.
-                    revised = _revise(problem, working_set, found, recorder)
+                    revised = _revise(problem, working_set, found, recorder, guard, point)
                     if revised is not None:
                         working_set = revised
                         continue
@@ -436,24 +473,77 @@ def solve(
                         status=status,
                         metrics=recorder.metrics(),
                     )
-                point, limit = stepped
+                candidate, limit = stepped
             else:
                 limit = step_limit(problem, point, direction.d, working_set)
                 if limit.is_unbounded:
                     return _finish(problem, point, working_set, "unbounded", recorder, stopping)
-                point = point + limit.alpha * direction.d
-            checker.accepted_iterate(problem, point)
-            if limit.blocking is not None:
-                working_set = updates.add_inequality(working_set, limit.blocking)
-                recorder.constraint_added()
+                candidate = point + limit.alpha * direction.d
 
-            # §7.3: whatever the step reached, the cone's status follows the geometry. Done
-            # after the step rather than before it because that is where the geometry
-            # changed, and it is the conic half of what §7.1 does for a blocking row.
-            before = working_set.cone_status
-            working_set = updates.activate_cones(problem, point, working_set, tolerance=activation)
-            for old, new in zip(before, working_set.cone_status, strict=True):
-                recorder.cone_changed(old, new)
+            # §17.2's merit safeguard, and #29's no-progress rule, which reach the same
+            # place by different routes and so share one.
+            #
+            # The safeguard: the direction is a descent direction and the step was chosen
+            # along it, so an accepted iterate *worse* than the best one seen means the
+            # arithmetic and the geometry have disagreed, and continuing from it would
+            # compound the disagreement. The rule: a step that moves the iterate by nothing
+            # is not progress, whatever the ratio test called it -- near a solution the
+            # retraction's corrections are second order and the loop can spend its whole
+            # budget taking steps that change no digit of the point.
+            #
+            # A refused step and a step that achieved nothing are the same situation from
+            # here on: the iterate stands, and whether that is optimality or a stall is the
+            # multiplier tests' to decide. So a refusal is recorded as `stationary` rather
+            # than handled, and the one exit below serves both.
+            value = objective_of(problem.c, candidate)
+            if guard.accepts(value):
+                moved = float(np.abs(candidate - point).max(initial=0.0))
+                stationary = moved <= _PROGRESS * max(1.0, float(np.abs(point).max(initial=0.0)))
+                point = candidate
+                guard.accepted(value)
+                checker.accepted_iterate(problem, point)
+                if limit.blocking is not None:
+                    working_set = updates.add_inequality(working_set, limit.blocking)
+                    recorder.constraint_added()
+            else:
+                stationary = True
+
+            # §7.3: the cone's status follows the geometry -- but only where there is new
+            # geometry to read. A step that moved the
+            # iterate by nothing leaves the conic slack exactly as it was, so re-deriving the
+            # cone's status from it can only restore what the iteration just released -- and
+            # on eq. (7) at the apex that is a two-state cycle, APEX to INACTIVE and back,
+            # which is what §8.2's oscillation looks like when the factor is at its apex
+            # rather than near its boundary. Skipping the re-derivation lets the no-progress
+            # rule below see an unchanged working set and stop.
+            if not stationary:
+                before = working_set.cone_status
+                working_set = updates.activate_cones(problem, point, working_set, tolerance=activation)
+                for old, new in zip(before, working_set.cone_status, strict=True):
+                    recorder.cone_changed(old, new)
+
+            # An iteration that moved the iterate by nothing *and* changed nothing about the
+            # working set has achieved nothing at all, and repeating it will achieve nothing
+            # again. A zero-length step is not itself evidence of that -- blocking at
+            # `alpha = 0` is how a constraint gets added, and adding it is progress -- so
+            # both halves are required. This is what catches the tail the direction test
+            # cannot: near a solution the retraction cuts steps to nothing while `d` stays an
+            # order of magnitude above `_STATIONARY`, and the loop would otherwise spend its
+            # whole budget there.
+            if stationary and working_set == unchanged:
+                revised = _revise(problem, working_set, found, recorder, guard, point)
+                if revised is not None:
+                    working_set = revised
+                    continue
+                status = "optimal" if measured.is_optimal(tolerance=stopping) else "stalled"
+                return Solution(
+                    z=point,
+                    multipliers=found,
+                    working_set=working_set,
+                    residuals=residuals(problem, point, found),
+                    status=status,
+                    metrics=recorder.metrics(),
+                )
 
     return _finish(problem, point, working_set, "iteration_limit", recorder, stopping)
 
@@ -713,6 +803,8 @@ def _revise(
     working_set: WorkingSet,
     found: Multipliers,
     recorder: Recorder,
+    guard: Guard,
+    z: Vector,
 ) -> WorkingSet | None:
     """The multiplier test of §4.1's step 8: does any multiplier say to drop something?
 
@@ -728,17 +820,21 @@ def _revise(
         working_set: the current set.
         found: the multipliers at this point.
         recorder: the metrics recorder, told about each removal and status change.
+        guard: #29's anti-cycling state, which decides whether §7.2's rule or Bland's is in
+            force. The switch lives there rather than here so that this function does not
+            have to know there is one.
+        z: the current point, for §8.2's hysteresis band.
 
     Returns:
         A revised working set to continue from, or ``None`` when every multiplier has the
         sign its constraint requires -- which is the point at which the residuals get to
         say whether that means optimal or merely stuck.
     """
-    dropping = updates.removal_candidate(working_set, found.y)
+    dropping = guard.candidate(working_set, found.y, tolerance=updates.MULTIPLIER_TOLERANCE)
     if dropping is not None:
         recorder.constraint_removed()
         return updates.drop_inequality(working_set, dropping)
-    updated, dropped = updates.deactivate_cones(problem, working_set, found)
+    updated, dropped = updates.deactivate_cones(problem, working_set, found, z=z)
     if not dropped:
         return None
     for index in dropped:

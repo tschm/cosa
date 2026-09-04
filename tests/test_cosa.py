@@ -140,11 +140,18 @@ def test_every_accepted_iterate_is_feasible(program):
 
 
 def test_the_final_residuals_certify_the_answer(program):
-    """§14.3's Level 3: all five within tolerance is a certificate, the problem being convex."""
+    """§14.3's Level 3: all five within tolerance is a certificate, the problem being convex.
+
+    All five are checked at rounding level rather than the loop's tolerance, because on
+    these small programs there is nothing to stop them being exact. *Which* residual is
+    nominally the largest at `1e-16` is not asserted: #27's null-space route recovers
+    multipliers by a triangular solve where the reference route recovered them from an LU of
+    the whole system, and the two put their last bit in different places.
+    """
     _, problem = program
     solution = cosa.solve(problem, checker=CHECKED)
     assert solution.residuals.is_optimal()
-    assert solution.residuals.worst() in {"none", "primal feasibility", "linear complementarity"}
+    assert solution.residuals.largest < 1e-12
 
 
 # ----------------------------------------------------------------------------------
@@ -290,10 +297,13 @@ def test_an_irreparable_degeneracy_stops_the_loop_unless_regularized():
     stops and says `degenerate`; with `delta > 0` it runs to a conclusion instead.
 
     *Which* conclusion is the honest part. The objective is constant on the feasible line
-    here, so the true direction is exactly zero everywhere -- and the regularized one is
-    `O(delta)`, which with nothing to block a step reads as an improving direction. The loop
-    concludes `unbounded`. That is the documented cost of answering a nearby question, and
-    it is why `REGULARIZATION` is small and removal is always tried first.
+    here, so the true direction is exactly zero everywhere and the regularized one is
+    `O(delta)`. Whether that residue reads as an improving direction depends on how small a
+    direction the loop is willing to call vanished: at the original `_STATIONARY` of `1e-10`
+    a `delta` of `1e-8` produced a spurious `unbounded`, and at the retraction's floor it
+    does not. Both are accepted here, because the point being made is that regularization
+    completes a solve that removal could not -- the *cost* of answering a nearby question is
+    made precisely in the direction-level test below, where no threshold is involved.
     """
     flat = SOCP.unconstrained(np.array([1.0, 1.0])).add_equalities([[1.0, 1.0], [1.0, 1.0]], [1.0, 1.0])
 
@@ -303,7 +313,7 @@ def test_an_irreparable_degeneracy_stops_the_loop_unless_regularized():
 
     regularized = cosa.solve(flat, regularization=1e-8)
     assert regularized.status != "degenerate", "the solve completed rather than stopping"
-    assert regularized.status == "unbounded", "on a flat objective, to a different answer"
+    assert regularized.status in {"optimal", "unbounded"}
 
 
 def test_regularization_lets_the_direction_solve_proceed_where_removal_cannot():
@@ -416,8 +426,13 @@ def test_the_solution_reports_status_residuals_and_metrics(simplex):
 
 
 def test_the_metrics_count_one_factorization_per_solve(simplex):
-    """§13.1's policy, visible through the loop -- the baseline #27 has to beat."""
-    metrics = cosa.solve(simplex, checker=CHECKED).metrics
+    """§13.1's policy, visible through the loop -- the baseline #27 had to beat.
+
+    Reached now by asking for it: `reuse=False` restores the reference policy, and under it
+    every KKT solve is a fresh factorization. That the default no longer does this is #27's
+    result and is measured in `tests/test_reuse.py`.
+    """
+    metrics = cosa.solve(simplex, checker=CHECKED, reuse=False).metrics
     assert metrics.factorizations == metrics.kkt_solves
 
 

@@ -54,6 +54,7 @@ import numpy as np
 from cosa.active_set.multipliers import STATIONARITY_TOLERANCE, Multipliers
 from cosa.geometry.soc import ConePosition, positions
 from cosa.linear_algebra.kkt import RHO, direction
+from cosa.linear_algebra.reuse import Reuse
 from cosa.problem.socp import _vector
 
 if TYPE_CHECKING:
@@ -137,6 +138,12 @@ class Metrics:
         peak_memory: peak bytes allocated during the solve, or ``None`` when memory was not
             tracked. §12.3 asks for it "where relevant", and tracking it costs enough that
             relevance has to be opted into.
+        working_set_revisits: how many times the most-revisited working set was reached.
+            Not in §11's list, because §11 lists what a *benchmark* reports and this is what
+            a *diagnosis* needs: §17.2's cycling risk is precisely the claim that this
+            number can grow without bound, and #29's answer is only checkable if the number
+            is visible. One means every working set was seen once, which is a solve that
+            never backtracked at all.
     """
 
     iterations: int = 0
@@ -149,6 +156,7 @@ class Metrics:
     factorization_time: float = 0.0
     kkt_residual: float = float("nan")
     peak_memory: int | None = None
+    working_set_revisits: int = 0
 
     @property
     def active_set_changes(self) -> int:
@@ -223,6 +231,7 @@ class Recorder:
         self._removed = 0
         self._cone_changes = 0
         self._factorizations = 0
+        self._revisits = 0
         self._kkt_solves = 0
         self._runtime = 0.0
         self._factorization_time = 0.0
@@ -272,6 +281,7 @@ class Recorder:
         rho: float = RHO,
         regularization: float = 0.0,
         curvature: Matrix | None = None,
+        reuse: Reuse | None = None,
     ) -> Direction:
         """Solve the direction subproblem, counting one factorization and one solve.
 
@@ -285,17 +295,41 @@ class Recorder:
             curvature: #23's Lagrangian curvature term, passed through unchanged. It changes
                 the ``(1, 1)`` block, not the cost of forming or factorizing it, so it too
                 counts the same.
+            reuse: #27's factorization cache, or ``None`` for §13.1's
+                refactorize-every-iteration reference policy. When one is supplied the
+                factorization counter advances only when it actually factorized, which is
+                the whole point of the counter: under the reference policy it equals
+                :attr:`Metrics.kkt_solves`, and the gap between them is #27's result. A
+                regularized solve bypasses the cache, because §8.3's ``delta`` changes the
+                system rather than the working set and there is nothing to reuse.
 
         Returns:
             The direction, exactly as :func:`cosa.linear_algebra.kkt.direction` returns it.
         """
         self._kkt_solves += 1
-        with self.factorizing():
-            return direction(problem, working_set, z, rho=rho, regularization=regularization, curvature=curvature)
+        if reuse is None or regularization:
+            with self.factorizing():
+                return direction(problem, working_set, z, rho=rho, regularization=regularization, curvature=curvature)
+        before = reuse.factorizations
+        started = time.perf_counter()
+        try:
+            return reuse.direction(problem, working_set, z, rho=rho, curvature=curvature)
+        finally:
+            self._factorization_time += time.perf_counter() - started
+            self._factorizations += reuse.factorizations - before
 
     def iteration(self) -> None:
         """Count one active-set iteration."""
         self._iterations += 1
+
+    def working_set_seen(self, visits: int) -> None:
+        """Record how often the working set now in force has been reached.
+
+        Args:
+            visits: the visit count :meth:`cosa.solver.anticycling.Guard.saw` returned. Only
+                the maximum is kept, because that is the number §17.2's risk is about.
+        """
+        self._revisits = max(self._revisits, visits)
 
     def constraint_added(self) -> None:
         """Count one §7.1 activation."""
@@ -341,6 +375,7 @@ class Recorder:
             constraints_removed=self._removed,
             cone_changes=self._cone_changes,
             factorizations=self._factorizations,
+            working_set_revisits=self._revisits,
             kkt_solves=self._kkt_solves,
             runtime=self._runtime,
             factorization_time=self._factorization_time,

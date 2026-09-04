@@ -25,14 +25,15 @@ above are authoritative even before the files exist. Landed so far: `problem/soc
 `problem/portfolio.py`, `geometry/soc.py`, `geometry/tangent.py`,
 `geometry/step.py`, `active_set/working_set.py`, `active_set/updates.py`,
 `active_set/multipliers.py`, `linear_algebra/factorization.py`, `linear_algebra/kkt.py`, `linear_algebra/rank.py`,
-`linear_algebra/scaling.py`, `solver/apex.py`, `solver/cosa.py`,
+`linear_algebra/reuse.py`, `linear_algebra/scaling.py`, `solver/anticycling.py`,
+`solver/apex.py`, `solver/cosa.py`,
 `solver/initialization.py`, `solver/instrumentation.py`, `solver/termination.py`,
 `experiments/reference.py`, `experiments/portfolio.py` and `experiments/randomized.py`.
 The rest are still names.
 
-Five modules in the list above are **not** in the plan's table, and all five are the same
-kind of omission: the plan describes the *algorithm* and the *studies*, and is silent
-about the scaffolding both need.
+Seven modules in the list above are **not** in the plan's table. Five are the same kind of
+omission — the plan describes the *algorithm* and the *studies*, and is silent about the
+scaffolding both need — and two are splits of a module the plan does name.
 
 - `solver/apex.py`, the branch of [#24](https://github.com/tschm/cosa/issues/24). §8.1
   calls the apex "a distinct direction computation inside the solver" without giving it a
@@ -47,6 +48,15 @@ about the scaffolding both need.
   [#15](https://github.com/tschm/cosa/issues/15). §11 and §12.3 promise thirteen measured
   quantities between them and §14 sets out two runtime invariants; the plan's `cosa.py`,
   `initialization.py` and `termination.py` are the algorithm, not its measurement.
+
+- `linear_algebra/reuse.py` and `solver/anticycling.py` are the two splits. The plan's
+  `factorization.py` covers both the strategy *comparison* ([#26](https://github.com/tschm/cosa/issues/26))
+  and the *reuse* ([#27](https://github.com/tschm/cosa/issues/27)); they are separated
+  because they have different lifetimes and different shapes — one is a measurement made
+  once against a fixed baseline, the other is a stateful object the loop carries from
+  iteration to iteration. `anticycling.py` is [#29](https://github.com/tschm/cosa/issues/29),
+  which §17.2 raises as a *risk* and never gives a home; it is not part of the iteration so
+  much as a constraint on it, and the loop reads it the way it reads a tolerance.
 
 - `experiments/reference.py`, the reference-solver oracle of
   [#21](https://github.com/tschm/cosa/issues/21). The plan puts solver comparison in
@@ -243,6 +253,27 @@ difference between an answer and the iteration limit. The measurement is
 The multipliers it needs are the previous iteration's, which makes the scheme a fixed
 point rather than an implicit system. The first iteration uses zero, so a #23 solve and a
 Wave 6 solve begin identically and every difference between them is attributable.
+
+## What "reuse" turned out to be worth
+
+[#27](https://github.com/tschm/cosa/issues/27) asks that "the number of KKT factorizations
+metric falls measurably below the refactor-every-iteration baseline". It does, decisively:
+across the eleven portfolio families the share of solves that need a fresh factorization
+goes from 98.9% to 1.4%, and across §16.3's randomized sweep from 98.7% to 1.5%. A whole
+solve typically factorizes twice.
+
+**Wall-clock time is a different answer, and it is the interesting one.** At the sizes the
+portfolio families use, updating is *slower* than the refactorization it replaces. The
+reason is structural: a column update against a full `(n, n)` orthogonal factor costs
+`O(n^2)`, while a fresh QR of an `(n, m)` matrix costs `O(n m^2)` — so the update wins only
+once `m^2` exceeds `n`. The classical argument for factorization updates quietly assumes a
+working set comparable in size to the problem; an active-set method on a portfolio runs with
+`m` well below `n`, and there the arithmetic goes the other way. Measured on the
+box-constrained family: 0.98× at `n = 300`, 1.12× at `n = 500`.
+
+Both halves are worth keeping. The counter is what §11 asks for and what #35's warm-start
+experiment reads; the wall-clock crossover is what #34's comparison has to report honestly,
+and what a reader deciding whether to adopt the technique needs.
 
 ## The other decision recorded once
 

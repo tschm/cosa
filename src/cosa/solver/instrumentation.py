@@ -57,7 +57,7 @@ from cosa.linear_algebra.kkt import RHO, direction
 from cosa.problem.socp import _vector
 
 if TYPE_CHECKING:
-    from cosa import Vector
+    from cosa import Matrix, Vector
     from cosa.active_set.working_set import ConeStatus, WorkingSet
     from cosa.linear_algebra.kkt import Direction
     from cosa.problem.socp import SOCP
@@ -271,6 +271,7 @@ class Recorder:
         *,
         rho: float = RHO,
         regularization: float = 0.0,
+        curvature: Matrix | None = None,
     ) -> Direction:
         """Solve the direction subproblem, counting one factorization and one solve.
 
@@ -281,13 +282,16 @@ class Recorder:
             rho: the ``rho`` of ``H = rho*I``.
             regularization: §8.3's ``delta``, passed through unchanged. A regularized solve
                 is still one factorization, so it counts the same.
+            curvature: #23's Lagrangian curvature term, passed through unchanged. It changes
+                the ``(1, 1)`` block, not the cost of forming or factorizing it, so it too
+                counts the same.
 
         Returns:
             The direction, exactly as :func:`cosa.linear_algebra.kkt.direction` returns it.
         """
         self._kkt_solves += 1
         with self.factorizing():
-            return direction(problem, working_set, z, rho=rho, regularization=regularization)
+            return direction(problem, working_set, z, rho=rho, regularization=regularization, curvature=curvature)
 
     def iteration(self) -> None:
         """Count one active-set iteration."""

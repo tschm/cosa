@@ -61,12 +61,30 @@ that inside the cone. Those four things -- a working set of linear constraints, 
 representation, exact conic step lengths, multiplier-based updates -- are §9 Phase III's
 list, and wiring them together is all this module does with them.
 
-**Activation only, which is what breaks the dependency cycle.** §7.3 is explicit that
-geometric activity *"alone is not sufficient to establish optimality"*, and §7.4 hands
-deactivation to the conic multiplier and the normal cone. So a cone that has joined the
-working set never leaves it here. That is #23's, and until it lands an instance whose
-optimum wants the cone *inactive* terminates without a certificate rather than with a wrong
-one -- the residuals say which.
+**Deactivation is the multiplier's decision, and on eq. (7) it provably never fires.**
+§7.3 is explicit that geometric activity *"alone is not sufficient to establish
+optimality"*, and §7.4 hands the other half to the conic multiplier and the normal cone.
+:func:`cosa.active_set.updates.deactivate_cones` is that rule, and the loop consults it
+wherever it consults §7.2's -- at a stationary point, after the inequality test, because a
+drop is only meaningful once the working set has stopped permitting progress.
+
+On the mean-standard-deviation problem it is inert, and the reason is worth writing down.
+``t`` appears in exactly one linear row -- the cone's head -- and in the objective, with
+coefficient ``lam``. Reading the direction subproblem's stationarity in the ``t`` slot gives
+
+    rho * d_t + nu_cone = -lam,      so      w_0 = -nu_cone = lam + rho * d_t,
+
+and at a stationary point ``d = 0``, so ``w_0 = lam``. A tangent factor's ``w`` is
+``-nu_cone * (1, -u)``, whose tail has norm exactly ``|w_0|``, so ``w`` sits precisely on
+the boundary of ``Q`` with a strictly positive head. It can be neither outside ``Q`` nor
+zero. **An active cone at an eq. (7) optimum always contributes a genuine active normal**,
+and §7.4's test says keep it, every time.
+
+That is a result about the formulation, not a limitation of the rule: away from a
+stationary point ``w_0 = lam + rho * d_t`` is free to go negative, and on a general SOCP
+with several factors the test is a real one. It also removes the cycling hazard that a
+geometric deactivation rule would have here -- there is nothing for the rule to release, so
+there is nothing for §7.3 to re-acquire.
 
 **A tangent step is retracted, and the reason is a result rather than an implementation
 choice.** Two facts about eq. (7), both verified in ``tests/test_prototype.py``:
@@ -97,8 +115,19 @@ the objective at first order -- so a short enough step improves the objective, a
 backtracking search finds one. When no step improves it, the point is stationary for the
 working set and the multiplier tests take over.
 
-This is explicitly the *prototype's* answer. §7.4 and #23 replace it with primal-dual conic
-working-set logic, which is where the geometry gets handled rather than stepped around.
+**#23's answer is to give the direction the curvature the tangent plane is missing.** A
+tangent step leaves a curved surface because the subproblem's ``H = rho*I`` describes a
+*plane*; the Lagrangian's Hessian describes the surface. §3.3 asks for a formulation "in
+terms of the primal-dual conic KKT conditions", and
+:func:`cosa.active_set.multipliers.lagrangian_curvature` is what that phrase buys: the dual
+variable ``mu = w_0`` weights the cone's second derivative and enters the *primal* direction
+computation, so the two are solved together rather than one after the other.
+
+The multipliers needed to build it are the ones the last direction produced, which makes the
+scheme a fixed point rather than an implicit system -- the first iteration uses zero and so
+reproduces Waves 4-6 exactly. The retraction stays, because any method that keeps its
+iterates exactly on a curved boundary must restore feasibility after a straight step; what
+changes is how often it has to work hard, and the metrics say by how much.
 
 **The apex is a branch, not a special case in the loop.** When a factor's slack reaches its
 apex the tangent representation has nothing to say, and #24's
@@ -118,7 +147,7 @@ from typing import TYPE_CHECKING, Final
 import numpy as np
 
 from cosa.active_set import updates
-from cosa.active_set.multipliers import Multipliers, from_direction
+from cosa.active_set.multipliers import Multipliers, from_direction, lagrangian_curvature
 from cosa.active_set.working_set import WorkingSet
 from cosa.geometry.soc import is_apex
 from cosa.geometry.step import StepLimit, linear_step, step_limit
@@ -177,10 +206,11 @@ without the anti-cycling rules of #29 the loop can revisit a working set forever
 A thousand rather than the two hundred the polyhedral baseline needed, because the
 retraction changes the cost model. Crawling along a *curved* boundary in tangent steps is a
 first-order process: each step is limited by how far the retraction can be afforded, so the
-count grows as the optimum is approached. The structured families take between thirty and
-three hundred iterations. §9 Phase III (``paper.tex:740``) says correctness matters more
-than speed at this stage, and this is where that is being spent; #27's factorization reuse
-and #23's primal-dual logic are what change it.
+count grows as the optimum is approached. #23's Lagrangian curvature roughly halves that -- measured across the family
+suite, and on the ill-conditioned family it is the difference between an answer and the
+iteration limit -- but the shape of the cost is unchanged, and #27's factorization reuse is
+what addresses the rest. §9 Phase III (``paper.tex:740``) says correctness matters more than
+speed at this stage, and this is where that is being spent.
 """
 
 _STATIONARY: Final = 1e-10
@@ -207,8 +237,9 @@ class Solution:
             ``"stalled"`` or ``"blocked-at-apex"``. A status other than ``"optimal"`` is a
             description of what stopped the loop, not an excuse: each names a specific thing
             that happened. ``"blocked-at-apex"`` is the Risk 1 case #24 identified -- the
-            apex is not justified and cannot be released -- and is the one that belongs to
-            #23 rather than to a bug.
+            apex is not justified and cannot be released, and §7.4's test cannot help
+            because the release it would authorize is arithmetically unavailable. It
+            belongs to #39 rather than to a bug.
         metrics: every quantity §11 and §12.3 ask for.
     """
 
@@ -301,6 +332,11 @@ def solve(
 
     checker.accepted_iterate(problem, point)
     working_set = _working_set_at(problem, point)
+    # The Lagrangian curvature needs multipliers the direction has not produced yet, so the
+    # first pass uses zero -- which is `H = rho*I`, the subproblem Waves 4-6 solved. From
+    # then on each direction is built on the last one's duals: a fixed-point iteration, and
+    # the cheapest honest reading of "primal-dual".
+    previous = _no_multipliers(problem)
 
     with recorder.solving():
         for _ in range(max_iterations):
@@ -338,8 +374,9 @@ def solve(
                 working_set = updates.activate_cones(problem, point, working_set, tolerance=activation)
                 continue
 
+            curvature = lagrangian_curvature(problem, working_set, point, previous)
             try:
-                direction = recorder.solve_direction(problem, working_set, point, rho=rho)
+                direction = recorder.solve_direction(problem, working_set, point, rho=rho, curvature=curvature)
             except SingularKktError:
                 working_set, dropped = updates.drop_dependent_rows(problem, working_set, point)
                 if dropped:
@@ -349,10 +386,16 @@ def solve(
                 if not regularization:
                     return _finish(problem, point, working_set, "degenerate", recorder, stopping)
                 direction = recorder.solve_direction(
-                    problem, working_set, point, rho=rho, regularization=regularization
+                    problem,
+                    working_set,
+                    point,
+                    rho=rho,
+                    regularization=regularization,
+                    curvature=curvature,
                 )
 
             found = from_direction(problem, working_set, point, direction)
+            previous = found
             measured = residuals(problem, point, found)
             recorder.kkt_residual(measured.largest)
 
@@ -360,9 +403,31 @@ def solve(
                 1.0, float(np.abs(point).max(initial=0.0))
             ):
                 checker.computed_multipliers(problem, found)
-                dropping = updates.removal_candidate(working_set, found.y)
-                if dropping is None:
-                    status = "optimal" if measured.is_optimal(tolerance=stopping) else "degenerate"
+                revised = _revise(problem, working_set, found, recorder)
+                if revised is not None:
+                    working_set = revised
+                    continue
+                status = "optimal" if measured.is_optimal(tolerance=stopping) else "degenerate"
+                return Solution(
+                    z=point,
+                    multipliers=found,
+                    working_set=working_set,
+                    residuals=measured,
+                    status=status,
+                    metrics=recorder.metrics(),
+                )
+
+            if working_set.active_cones and _heads_are_free(problem):
+                stepped = _retracted_step(problem, point, direction.d, working_set)
+                if stepped is None:
+                    # No step along this direction improves the objective once the cone has
+                    # been restored, so the point is stationary for this working set even
+                    # though the direction is not zero. The multiplier tests decide next.
+                    revised = _revise(problem, working_set, found, recorder)
+                    if revised is not None:
+                        working_set = revised
+                        continue
+                    status = "optimal" if measured.is_optimal(tolerance=stopping) else "stalled"
                     return Solution(
                         z=point,
                         multipliers=found,
@@ -371,30 +436,6 @@ def solve(
                         status=status,
                         metrics=recorder.metrics(),
                     )
-                working_set = updates.drop_inequality(working_set, dropping)
-                recorder.constraint_removed()
-                continue
-
-            if working_set.active_cones and _heads_are_free(problem):
-                stepped = _retracted_step(problem, point, direction.d, working_set)
-                if stepped is None:
-                    # No step along this direction improves the objective once the cone has
-                    # been restored, so the point is stationary for this working set even
-                    # though the direction is not zero. The multiplier tests decide next.
-                    dropping = updates.removal_candidate(working_set, found.y)
-                    if dropping is None:
-                        status = "optimal" if measured.is_optimal(tolerance=stopping) else "stalled"
-                        return Solution(
-                            z=point,
-                            multipliers=found,
-                            working_set=working_set,
-                            residuals=measured,
-                            status=status,
-                            metrics=recorder.metrics(),
-                        )
-                    working_set = updates.drop_inequality(working_set, dropping)
-                    recorder.constraint_removed()
-                    continue
                 point, limit = stepped
             else:
                 limit = step_limit(problem, point, direction.d, working_set)
@@ -645,3 +686,62 @@ def _finish(
         status=status,
         metrics=recorder.metrics(),
     )
+
+
+def _no_multipliers(problem: SOCP) -> Multipliers:
+    """Zero multipliers, the starting point of the curvature's fixed-point iteration.
+
+    Zero rather than a guess: it makes the first direction subproblem exactly ``H = rho*I``,
+    so the first step of a #23 solve is bit-for-bit the first step of a Wave 6 solve and any
+    difference between them is attributable to the curvature rather than to initialization.
+
+    Args:
+        problem: the instance, for its shape.
+
+    Returns:
+        Multipliers of the right shape, all zero.
+    """
+    return Multipliers(
+        y=np.zeros(problem.num_inequalities),
+        nu=np.zeros(problem.num_equalities),
+        w=np.zeros(problem.cone.dim),
+    )
+
+
+def _revise(
+    problem: SOCP,
+    working_set: WorkingSet,
+    found: Multipliers,
+    recorder: Recorder,
+) -> WorkingSet | None:
+    """The multiplier test of §4.1's step 8: does any multiplier say to drop something?
+
+    Both places the loop stops making progress ask this same question, so it is asked in
+    one place. §7.2's inequality rule is tried first and §7.4's conic rule second, and the
+    order is not arbitrary: a wrong-signed ``y`` is routine and cheap to act on, while
+    releasing a cone changes the local description of the feasible set. Trying the cheaper
+    repair first means the conic test is only ever asked at a point where nothing else
+    explains the halt.
+
+    Args:
+        problem: the instance.
+        working_set: the current set.
+        found: the multipliers at this point.
+        recorder: the metrics recorder, told about each removal and status change.
+
+    Returns:
+        A revised working set to continue from, or ``None`` when every multiplier has the
+        sign its constraint requires -- which is the point at which the residuals get to
+        say whether that means optimal or merely stuck.
+    """
+    dropping = updates.removal_candidate(working_set, found.y)
+    if dropping is not None:
+        recorder.constraint_removed()
+        return updates.drop_inequality(working_set, dropping)
+    updated, dropped = updates.deactivate_cones(problem, working_set, found)
+    if not dropped:
+        return None
+    for index in dropped:
+        recorder.cone_changed(working_set.status(index), updated.status(index))
+        recorder.constraint_removed()
+    return updated

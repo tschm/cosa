@@ -278,6 +278,7 @@ def benchmark(
     seeds: Sequence[int] = (0, 1),
     oracle: ReferenceSolver | None = None,
     large: int = 60,
+    lams: Sequence[float] | None = None,
 ) -> tuple[Comparison, ...]:
     """Run all four modes and return both tables for each.
 
@@ -288,6 +289,11 @@ def benchmark(
             none installed is not an error: the study still reports COSA's own numbers and
             marks the agreement column as having nothing to compare against.
         large: how many assets the large-problem mode uses.
+        lams: the risk aversions the sequence mode traces, or ``None`` for
+            :func:`cosa.experiments.frontier.risk_aversions`. A shorter sequence is a
+            smaller study rather than a different one -- the mode is about how a sequence
+            behaves, and six points show that as well as twenty-four when the question is
+            whether the machinery works.
 
     Returns:
         One comparison per mode, family and seed.
@@ -354,7 +360,7 @@ def benchmark(
 
         # Sequence mode: #35's frontier as a single unit of work, because that is how a
         # caller tracing a frontier experiences it.
-        traced = sweep(families.box(assets, seed=seed))
+        traced = sweep(families.box(assets, seed=seed), lams)
         last = traced.points[-1]
         last_residuals = solver.solve(
             replace(families.box(assets, seed=seed).portfolio, lam=last.lam).to_socp()
@@ -389,6 +395,7 @@ def report(
     seeds: Sequence[int] = (0, 1),
     oracle: ReferenceSolver | None = None,
     large: int = 60,
+    lams: Sequence[float] | None = None,
 ) -> str:
     """The whole study as text, one line per comparison and a tally beneath.
 
@@ -397,11 +404,12 @@ def report(
         seeds: which draws.
         oracle: the reference solver, or ``None`` to pick one.
         large: how many assets the large-problem mode uses.
+        lams: the sequence mode's risk aversions, or ``None`` for the default sweep.
 
     Returns:
         The report.
     """
-    comparisons = benchmark(assets, seeds=seeds, oracle=oracle, large=large)
+    comparisons = benchmark(assets, seeds=seeds, oracle=oracle, large=large, lams=lams)
     lines = [f"benchmark: {len(comparisons)} comparison(s) across {len(MODES)} modes", ""]
     lines += [str(comparison) for comparison in comparisons]
     checked = [comparison for comparison in comparisons if comparison.accuracy.reference is not None]

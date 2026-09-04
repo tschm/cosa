@@ -153,13 +153,20 @@ class Point:
         return self.gap <= AGREEMENT
 
     def __str__(self) -> str:
-        """One table row: the seven quantities, in §11's order."""
+        """One table row: six of §11's seven quantities, plus the seventh as ``saved``.
+
+        Wall clock is deliberately absent, and it is the one quantity §11 names that is
+        missing. This row is written into a *committed* artifact, and the point of committing
+        one is that its diff shows when the numbers change -- a timing column churns on every
+        run and drowns that signal. §12.3's benchmark table is where wall clock belongs, and
+        it is honest there because nobody commits it expecting a clean diff.
+        """
         return (
             f"lam={self.lam:7.3f}  {self.status:9s} "
             f"iters {self.cold.iterations:5d} -> {self.warm.iterations:5d} (saved {self.saved:+5d})  "
             f"+{self.warm.constraints_added:3d}/-{self.warm.constraints_removed:3d} rows  "
             f"fact {self.cold.factorizations:4d} -> {self.warm.factorizations:3d}  "
-            f"{self.warm.runtime * 1e3:7.2f}ms  residual {self.warm.kkt_residual:8.1e}  "
+            f"residual {self.warm.kkt_residual:8.1e}  "
             f"return {self.expected_return:8.4f}  sd {self.deviation:7.4f}"
         )
 
@@ -353,7 +360,9 @@ def report(
     totals = traced.totals()
     lines += [
         "",
-        f"warm totals: {totals}",
+        f"warm totals: {totals.iterations} iters, {totals.active_set_changes} active-set changes, "
+        f"{totals.factorizations} factorizations, {totals.kkt_solves} KKT solves, "
+        f"worst residual {totals.kkt_residual:.3g}",
         f"monotone frontier: {traced.is_monotone}",
     ]
     return "\n".join(lines)

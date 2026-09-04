@@ -13,4 +13,7 @@ Modules (each owned by its own issue):
         is where warm starting either pays off or does not. Landed.
     benchmarks: §12's comparison against reference SOCP solvers, in four modes with both
         metric tables. Landed.
+
+Deliverable 9's reproducible rerun is ``python -m cosa.experiments``, which writes every
+study's artifact under ``docs/experiments`` along with the environment that produced it.
 """

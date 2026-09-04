@@ -1,0 +1,25 @@
+benchmark: 20 comparison(s) across 4 modes
+
+cold      basic                n=  10 optimal   | obj    -0.025754  gap 4.5e-10      residual  4.7e-10  return   0.0840  sd  0.0291 |    34.46ms    133 iters    133 solves     2 changes     1 fact (  14.51ms)     0.1x reference
+warm      basic                n=  10 optimal   | obj    -0.025754  gap 4.5e-10      residual  5.5e-10  return   0.0840  sd  0.0291 |    49.95ms    193 iters    193 solves     1 changes     1 fact (  20.68ms)     0.0x reference
+cold      box                  n=  10 optimal   | obj    -0.006453  gap 6.1e-11      residual  8.9e-10  return   0.0750  sd  0.0343 |     9.66ms     34 iters     34 solves     6 changes     1 fact (   3.93ms)     0.2x reference
+warm      box                  n=  10 optimal   | obj    -0.006453  gap 6.1e-11      residual  1.0e-10  return   0.0750  sd  0.0343 |     6.51ms     25 iters     25 solves     0 changes     1 fact (   2.73ms)     0.2x reference
+cold      sector               n=  10 optimal   | obj    -0.025754  gap 3.0e-10      residual  4.7e-10  return   0.0840  sd  0.0291 |    34.53ms    133 iters    133 solves     2 changes     1 fact (  14.22ms)     0.0x reference
+warm      sector               n=  10 optimal   | obj    -0.025754  gap 3.0e-10      residual  5.5e-10  return   0.0840  sd  0.0291 |    50.45ms    193 iters    193 solves     1 changes     1 fact (  20.92ms)     0.0x reference
+cold      factor exposure      n=  10 optimal   | obj    -0.025754  gap 1.0e-10      residual  5.4e-10  return   0.0840  sd  0.0291 |    53.94ms    209 iters    209 solves     4 changes     1 fact (  22.33ms)     0.0x reference
+warm      factor exposure      n=  10 optimal   | obj    -0.025754  gap 1.0e-10      residual  7.7e-10  return   0.0840  sd  0.0291 |    46.90ms    182 iters    182 solves     1 changes     1 fact (  19.20ms)     0.0x reference
+large     box                  n=  60 optimal   | obj    -0.055860  gap 1.3e-10      residual  3.8e-10  return   0.0897  sd  0.0169 |    74.94ms     58 iters     58 solves    39 changes     1 fact (  34.40ms)     0.4MB     0.1x reference
+sequence  box frontier x24     n=  10 optimal   | obj     0.185694  no reference     residual  5.4e-11  return   0.0654  sd  0.0314 |   210.76ms    796 iters    796 solves    11 changes     2 fact (  86.73ms)
+cold      basic                n=  10 optimal   | obj    -0.028408  gap 1.0e-09      residual  1.6e-10  return   0.1028  sd  0.0372 |    35.09ms    134 iters    134 solves     5 changes     1 fact (  14.44ms)     0.0x reference
+warm      basic                n=  10 optimal   | obj    -0.028408  gap 1.0e-09      residual  4.5e-10  return   0.1028  sd  0.0372 |    12.34ms     49 iters     49 solves     0 changes     1 fact (   4.94ms)     0.1x reference
+cold      box                  n=  10 optimal   | obj     0.007874  gap 1.2e-11      residual  5.8e-10  return   0.0948  sd  0.0514 |    29.22ms    112 iters    112 solves     4 changes     1 fact (  12.15ms)     0.1x reference
+warm      box                  n=  10 optimal   | obj     0.007874  gap 1.2e-11      residual  6.2e-10  return   0.0948  sd  0.0514 |    30.71ms    116 iters    116 solves     0 changes     1 fact (  12.80ms)     0.1x reference
+cold      sector               n=  10 optimal   | obj    -0.023744  gap 1.6e-11      residual  3.8e-10  return   0.1001  sd  0.0382 |    30.66ms    118 iters    118 solves     5 changes     1 fact (  12.64ms)     0.1x reference
+warm      sector               n=  10 optimal   | obj    -0.023744  gap 1.6e-11      residual  2.7e-10  return   0.1001  sd  0.0382 |    13.90ms     54 iters     54 solves     0 changes     1 fact (   5.70ms)     0.1x reference
+cold      factor exposure      n=  10 optimal   | obj    -0.028408  gap 1.2e-09      residual  1.6e-10  return   0.1028  sd  0.0372 |    36.46ms    134 iters    134 solves     5 changes     1 fact (  14.90ms)     0.0x reference
+warm      factor exposure      n=  10 optimal   | obj    -0.028408  gap 1.2e-09      residual  4.5e-10  return   0.1028  sd  0.0372 |    12.73ms     49 iters     49 solves     0 changes     1 fact (   5.18ms)     0.1x reference
+large     box                  n=  60 optimal   | obj    -0.054496  gap 4.4e-11      residual  2.8e-10  return   0.0916  sd  0.0185 |    81.96ms     61 iters     61 solves    42 changes     1 fact (  38.49ms)     0.4MB     0.1x reference
+sequence  box frontier x24     n=  10 optimal   | obj     0.292147  no reference     residual  2.2e-11  return   0.0809  sd  0.0466 |   369.28ms   1417 iters   1417 solves    15 changes     2 fact ( 152.52ms)
+
+Success Criterion 5: 18/18 objectives agree with the reference
+wall clock vs reference: 0.03x to 0.25x (below one means the reference is faster)

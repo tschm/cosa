@@ -32,6 +32,7 @@ from numpy.typing import NDArray
 
 from cosa.active_set.multipliers import Multipliers
 from cosa.active_set.working_set import ConeStatus, ConstraintNames, WorkingSet
+from cosa.api import NotOptimalError, Portfolio, solve_portfolio
 from cosa.geometry.soc import ConePosition
 from cosa.geometry.tangent import ApexError
 from cosa.linear_algebra.kkt import Direction, RowLayout, SingularKktError
@@ -61,6 +62,13 @@ Matrix = NDArray[np.float64]
 # their names only mean something next to their module: `cosa.slack` and `cosa.position`
 # would be unreadable at the root, and `cosa.geometry.soc.slack` is not.
 #
+# One exception, and it is deliberate: `solve_portfolio` is a routine and is here anyway.
+# It is Deliverable 5's "public portfolio optimization interface", and the rule above exists
+# to keep names readable at the root -- `cosa.solve_portfolio` reads exactly as it should,
+# and a front door that had to be found at `cosa.api.solve_portfolio` would be a front door
+# nobody uses. `Portfolio` and `NotOptimalError` come with it, because a return type and an
+# exception a caller must catch belong wherever the function they belong to is.
+#
 # The line runs between the *library* and the *harness*. The algorithm's vocabulary is
 # here -- the problem, the working set, the cone's position and status, the direction and
 # its row layout, and the two errors a solver loop has to catch. The experiment harness of
@@ -79,6 +87,8 @@ __all__ = [
     "MeanStdForm",
     "MeanStdPortfolio",
     "Multipliers",
+    "NotOptimalError",
+    "Portfolio",
     "ProblemError",
     "RowLayout",
     "Scaling",
@@ -87,4 +97,5 @@ __all__ = [
     "SingularKktError",
     "Vector",
     "WorkingSet",
+    "solve_portfolio",
 ]

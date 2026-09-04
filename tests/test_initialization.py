@@ -177,8 +177,15 @@ def test_a_repeated_head_variable_is_not_free():
         init.raise_free_heads(problem, np.zeros(2))
 
 
-def test_a_head_row_that_is_not_a_unit_selector_is_not_free():
-    """A head with a coefficient other than one is not a variable this can simply set."""
+def test_a_head_row_with_any_single_coefficient_is_free():
+    """A coefficient of two is as settable as a coefficient of one — it is one division.
+
+    The regression test for a bug that cost two waves. This required *exactly* `1.0`, which
+    no rescaled instance satisfies, so `_heads_are_free` reported `False` on such an
+    instance, the retraction was silently unavailable, and an iterate on the cone's boundary
+    could not move at all. That failure was diagnosed as a conditioning problem and had an
+    ablation apparently confirming it. See `docs/development/failure-modes.md`.
+    """
     from cosa import ConeProduct
 
     problem = SOCP(
@@ -191,8 +198,30 @@ def test_a_head_row_that_is_not_a_unit_selector_is_not_free():
         h=np.zeros(2),
         cone=ConeProduct.from_dims(2),
     )
+    from cosa.geometry import soc
+
+    raised = init.raise_free_heads(problem, np.array([3.0, 0.0]))
+    slack = problem.cone_slack(raised)
+    assert slack[0] == pytest.approx(abs(slack[1])), "the head was set to exactly the tail's norm"
+    assert soc.is_member(slack, tolerance=1e-12)
+
+
+def test_a_head_row_selecting_two_variables_is_not_free():
+    """Setting one variable no longer determines the head, so there is nothing to solve."""
+    from cosa import ConeProduct
+
+    problem = SOCP(
+        c=np.array([0.0, 1.0, 0.0]),
+        A=np.zeros((0, 3)),
+        b=np.zeros(0),
+        E=np.zeros((0, 3)),
+        d=np.zeros(0),
+        G=np.array([[0.0, 1.0, 1.0], [1.0, 0.0, 0.0]]),
+        h=np.zeros(2),
+        cone=ConeProduct.from_dims(2),
+    )
     with pytest.raises(ProblemError, match="not a free variable"):
-        init.raise_free_heads(problem, np.zeros(2))
+        init.raise_free_heads(problem, np.zeros(3))
 
 
 def test_route_two_hands_off_when_the_cone_cannot_be_repaired():

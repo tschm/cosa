@@ -52,7 +52,7 @@ def test_nothing_stops_without_naming_a_reason(outcomes):
     assert failures.undiagnosed(outcomes) == ()
 
 
-def test_the_only_family_that_revisits_is_the_one_that_stalls(outcomes):
+def test_almost_nothing_revisits_a_working_set(outcomes):
     """#29's guarantee on the families, and where the guard actually earns its keep.
 
     Returning to a working set more often than `REVISITS` is what arms Bland's rule. On
@@ -67,10 +67,15 @@ def test_the_only_family_that_revisits_is_the_one_that_stalls(outcomes):
     assert all(outcome.verdict == "diagnosed" for outcome in revisiting)
 
 
-def test_almost_everything_solves(outcomes):
-    """Thirty-six of thirty-nine, and the three that do not are all one family."""
-    unsolved = [outcome for outcome in outcomes if outcome.verdict != "solved"]
-    assert {outcome.family for outcome in unsolved} == {"badly scaled"}
+def test_everything_solves(outcomes):
+    """All thirty-nine, which is a stronger claim than this file used to make.
+
+    `badly scaled` used to stall; the cause turned out to be `raise_free_heads` refusing any
+    cone head row whose coefficient was not exactly one, which made the retraction silently
+    unavailable. See `docs/development/failure-modes.md` — the interesting part is that the
+    first diagnosis was wrong and had an ablation apparently confirming it.
+    """
+    assert [outcome for outcome in outcomes if outcome.verdict != "solved"] == []
 
 
 def test_a_solved_verdict_means_the_residuals_agree(outcomes):
@@ -136,43 +141,42 @@ def test_the_degenerate_optimum_solves_almost_immediately(outcomes):
 # ----------------------------------------------------------------------------------
 
 
-def test_badly_scaled_stalls_and_says_so(outcomes):
-    """A diagnosed stop, not a silent wrong answer and not an iteration limit."""
+def test_badly_scaled_converges_and_spends_the_whole_budget(outcomes):
+    """The honest remaining caveat: it converges, to eleven digits, and slowly.
+
+    Fourteen orders of magnitude in the constraint matrix is not a conditioning failure for
+    this formulation — the KKT system does not inherit it, because the tangent puts `L` in as
+    a single row. What it costs is iterations.
+    """
     scaled = [outcome for outcome in outcomes if outcome.family == "badly scaled"]
-    assert all(outcome.status == "stalled" for outcome in scaled)
-    assert all(outcome.residual > 1e-3 for outcome in scaled), "it is genuinely far from optimal"
+    assert all(outcome.verdict == "solved" for outcome in scaled)
+    assert all(outcome.residual < 1e-9 for outcome in scaled)
+    assert all(outcome.exhausted for outcome in scaled)
 
 
-def test_equilibration_is_what_rescues_it(ablations):
-    """§12.4's fourth item: which mitigation addressed which failure, with evidence.
+def test_no_mitigation_changes_an_outcome(ablations):
+    """§12.4's fourth item, answered in the negative — which is the stronger answer.
 
-    The evidence is a counterfactual — the same instance, solved with the mitigation and
-    without — because that is the only form of the claim that can be wrong.
+    Everything solves without help. The counterfactual is still the only form of the claim
+    that can be wrong, and it is still worth running: it is what caught the earlier version
+    of this file asserting that equilibration rescued `badly scaled`, on evidence that was
+    sound and a conclusion that was not.
     """
-    rescue = next(
-        ablation
-        for ablation in ablations
-        if ablation.family == "badly scaled" and "equilibration" in ablation.mitigation
-    )
-    assert rescue.without_it.verdict == "diagnosed"
-    assert rescue.with_it.verdict == "solved"
-    assert rescue.mattered
+    for ablation in ablations:
+        assert ablation.with_it.verdict == ablation.without_it.verdict, ablation.mitigation
 
 
-def test_equilibration_is_not_free(ablations):
-    """It converts a stall into a certified optimum and spends the whole budget doing it.
+def test_equilibration_costs_iterations_and_buys_nothing(ablations):
+    """§13.3's scaling has no family it rescues, on this formulation.
 
-    Saying so is more useful than reporting "solved": what the mitigation establishes is
-    that the failure is one of *conditioning* rather than of the algorithm, and the cost is
-    part of that finding.
+    Consistent with an earlier result rather than surprising given it: the KKT system does
+    not inherit the covariance's conditioning, because the tangent representation puts `L`
+    into it as a single row and one row has no spectrum. There is less conditioning here to
+    fix than there looks to be.
     """
-    rescue = next(
-        ablation
-        for ablation in ablations
-        if ablation.family == "badly scaled" and "equilibration" in ablation.mitigation
-    )
-    assert rescue.with_it.exhausted
-    assert rescue.with_it.iterations > 10 * rescue.without_it.iterations
+    scaling = [ablation for ablation in ablations if "equilibration" in ablation.mitigation]
+    costlier = [ablation for ablation in scaling if ablation.with_it.iterations > ablation.without_it.iterations]
+    assert len(costlier) > len(scaling) / 2, "equilibration is a net cost on most families"
 
 
 def test_regularization_never_changes_an_outcome(ablations):
@@ -188,7 +192,12 @@ def test_regularization_never_changes_an_outcome(ablations):
 
 
 def test_reuse_changes_no_verdict_by_design(ablations):
-    """It is a cost policy, not a numerical one: the same direction by a different route."""
+    """It is a cost policy, not a numerical one: the same direction by a different route.
+
+    Agreeing to `1e-16` is not agreeing exactly, though, and over a few hundred iterations
+    the two trajectories separate — so the *iteration* count does move, and the verdict
+    does not.
+    """
     for ablation in ablations:
         if "reuse" in ablation.mitigation:
             assert ablation.with_it.verdict == ablation.without_it.verdict, ablation.family
@@ -218,21 +227,92 @@ def test_an_outcome_renders_its_own_row(outcomes):
     """One table row per solve, with the two caveats that are not the verdict."""
     rendered = {outcome.family: str(outcome) for outcome in outcomes}
     assert "solved" in rendered["basic"]
-    assert "start supplied" in rendered["badly scaled"], "its cone head is not a free variable"
+    assert "used the whole budget" in rendered["badly scaled"]
 
 
 def test_an_ablation_renders_its_own_row(ablations):
     """Without and with, in that order, because the reader is asking what it bought."""
     rendered = str(next(a for a in ablations if "equilibration" in a.mitigation and a.family == "badly scaled"))
-    assert "diagnosed -> solved" in rendered
+    assert "solved -> solved" in rendered
+    assert "iters" in rendered
 
 
-def test_the_report_names_the_mitigation_that_mattered():
-    """A study whose ablation section were empty would still print, and would say nothing.
+def test_the_report_says_that_nothing_mattered():
+    """A study whose ablation section is empty must say so rather than print a blank.
 
-    So the section is checked for content rather than for existence.
+    "None" is the current answer and it is a result, so the section is checked for content
+    rather than for existence.
     """
     text = failures.report(seeds=(0,))
     section = text.split("ablations that mattered:")[1]
-    assert "equilibration" in section
-    assert "none" not in section
+    assert "none" in section, "nothing changes an outcome any more, and the report says so"
+
+
+# ----------------------------------------------------------------------------------
+# The classification itself, on constructed outcomes
+# ----------------------------------------------------------------------------------
+
+
+def _outcome(status, *, certified=True, iterations=10):
+    """An outcome with a given status, for testing the classification directly."""
+    return failures.Outcome(
+        family="synthetic",
+        status=status,
+        residual=0.0 if certified else 1.0,
+        iterations=iterations,
+        factorizations=1,
+        revisits=1,
+        certified=certified,
+    )
+
+
+def test_the_four_verdicts_are_distinguished():
+    """Constructed rather than found, because the study no longer produces three of them.
+
+    That is a good problem to have and a bad reason to stop testing the classification: the
+    distinction between a stop that names what happened and one that does not is the study's
+    central instrument, and an instrument that is only exercised when something is broken is
+    not one you can trust when something breaks.
+    """
+    assert _outcome("optimal").verdict == "solved"
+    assert _outcome("optimal", certified=False).verdict == "loose"
+    assert _outcome("stalled").verdict == "diagnosed"
+    assert _outcome("degenerate").verdict == "diagnosed"
+    assert _outcome("blocked-at-apex").verdict == "diagnosed"
+    assert _outcome("iteration_limit").verdict == "undiagnosed"
+
+
+def test_only_the_iteration_limit_counts_as_undiagnosed():
+    """`degenerate`, `stalled` and `blocked-at-apex` each have an issue behind them."""
+    every = [_outcome(status) for status in ("optimal", "stalled", "degenerate", "iteration_limit")]
+    assert [outcome.family for outcome in failures.undiagnosed(every)] == ["synthetic"]
+
+
+def test_a_mitigation_can_matter_by_cost_alone():
+    """The weak form: no verdict changed, but the work did.
+
+    Worth reporting separately from the strong form. A mitigation that never changes an
+    outcome but halves the work is still doing something, and one that does neither is not
+    earning its place.
+    """
+    cheap = failures.Ablation(
+        mitigation="synthetic",
+        family="synthetic",
+        with_it=_outcome("optimal", iterations=10),
+        without_it=_outcome("optimal", iterations=100),
+    )
+    neither = failures.Ablation(
+        mitigation="synthetic",
+        family="synthetic",
+        with_it=_outcome("optimal", iterations=10),
+        without_it=_outcome("optimal", iterations=10),
+    )
+    changed = failures.Ablation(
+        mitigation="synthetic",
+        family="synthetic",
+        with_it=_outcome("optimal"),
+        without_it=_outcome("iteration_limit"),
+    )
+    assert cheap.mattered, "the weak form: same verdict, ten times the work"
+    assert changed.mattered, "the strong form: the verdict itself moved"
+    assert not neither.mattered

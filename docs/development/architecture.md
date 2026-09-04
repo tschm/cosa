@@ -25,9 +25,11 @@ above are authoritative even before the files exist. Landed so far: `problem/soc
 `problem/portfolio.py`, `geometry/soc.py`, `geometry/tangent.py`,
 `geometry/step.py`, `active_set/working_set.py`, `active_set/updates.py`,
 `active_set/multipliers.py`, `linear_algebra/factorization.py`, `linear_algebra/kkt.py`, `linear_algebra/rank.py`,
-`linear_algebra/reuse.py`, `linear_algebra/scaling.py`, `solver/anticycling.py`,
+`api.py`, `linear_algebra/reuse.py`, `linear_algebra/scaling.py`, `solver/anticycling.py`,
 `solver/apex.py`, `solver/cosa.py`,
 `solver/initialization.py`, `solver/instrumentation.py`, `solver/termination.py`,
+`solver/warm.py`, `experiments/failures.py`, `experiments/frontier.py`,
+`experiments/benchmarks.py`,
 `experiments/reference.py`, `experiments/portfolio.py` and `experiments/randomized.py`.
 The rest are still names.
 
@@ -274,6 +276,32 @@ box-constrained family: 0.98× at `n = 300`, 1.12× at `n = 500`.
 Both halves are worth keeping. The counter is what §11 asks for and what #35's warm-start
 experiment reads; the wall-clock crossover is what #34's comparison has to report honestly,
 and what a reader deciding whether to adopt the technique needs.
+
+## The front door is one routine at the root
+
+`cosa.solve_portfolio` is the only function re-exported from the package root, and it breaks
+the rule the rest of this document defends. That is deliberate, and for the same reason the
+rule exists: legibility. `cosa.slack` says nothing about what it is the slack *of*, so it
+stays in `cosa.geometry.soc`; `cosa.solve_portfolio` says exactly what it does, and a front
+door that had to be found at `cosa.api.solve_portfolio` would be a front door nobody uses.
+`Portfolio` and `NotOptimalError` come with it, because a return type and an exception a
+caller must catch belong wherever the function does.
+
+Two of its defaults were decisions rather than conveniences.
+
+**It refuses rather than returns.** A solve that does not reach a certified optimum raises,
+because a portfolio interface that silently returned holdings from a stalled solve would be
+handing someone a position to trade. The solver's own `Solution` reports a status and lets
+the caller decide, which is right for a study and wrong for a front door.
+
+**It does not equilibrate,** and arriving at that took changing the answer twice — the
+story is in [failure-modes.md](failure-modes.md#the-failure-that-was-not-what-it-looked-like-badly-scaled).
+The short version: building this interface exposed that `raise_free_heads` required a cone
+head row to select its variable with a coefficient of *exactly one*, which no rescaled
+instance satisfies, so the retraction was silently unavailable on such instances. What had
+looked like a conditioning failure that equilibration fixed was an initialization bug that
+equilibration perturbed around. With the restriction removed, equilibration costs iterations
+on every family and rescues none.
 
 ## The other decision recorded once
 

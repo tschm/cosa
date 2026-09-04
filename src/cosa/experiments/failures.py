@@ -231,26 +231,28 @@ class Ablation:
 def _run(instance: PortfolioInstance, policy: Policy = AS_SHIPPED) -> tuple[Solution, bool]:
     """Solve an instance, falling back to its own witness when no start can be constructed.
 
-    Not every family's cone head is a free variable -- ``turnover`` and ``badly scaled`` put
-    auxiliary variables in rows that pin it -- so
-    :func:`cosa.solver.initialization.raise_free_heads` cannot repair conic feasibility and
-    the elastic Phase I has nowhere to start either. That is a real limitation and it is
-    reported rather than papered over: the outcome records that a start had to be supplied.
+    **No family reaches the fallback any more, and how that changed is the study's best
+    finding.** ``turnover`` and ``badly scaled`` used to, because
+    :func:`cosa.solver.initialization.raise_free_heads` refused any cone head row whose
+    coefficient was not exactly one -- so conic feasibility could not be repaired, the elastic
+    Phase I had nowhere to start, and the study had to hand in the family's own witness. Removing
+    that restriction removed the need. The fallback is kept because it is the honest response for
+    a *general* SOCP whose head really is constrained elsewhere, and because a study meant to be
+    pointed at new families should not crash on the first one that is shaped differently.
 
-    It is also *not* a failure of the algorithm, which is why the study goes on to solve the
-    instance rather than stopping. Every family carries a
-    :attr:`cosa.experiments.portfolio.PortfolioInstance.witness`, and handing the solver one
-    is what a caller with a portfolio in hand would do.
+    Every family carries a :attr:`cosa.experiments.portfolio.PortfolioInstance.witness`, and
+    handing the solver one is what a caller with a portfolio in hand would do -- so taking that
+    route is recorded, not hidden, and is not counted as a failure of the algorithm.
 
     Args:
-        instance: the instance to solve.
-        policy: which mitigations to apply. ``scale`` puts the solve entirely in the
-            equilibrated problem, which :meth:`cosa.linear_algebra.scaling.Scaling.apply`
-            licenses: the feasible sets correspond, the objectives differ by a positive
-            factor, and the multipliers map back under a positive diagonal.
+            instance: the instance to solve.
+            policy: which mitigations to apply. ``scale`` puts the solve entirely in the
+                equilibrated problem, which :meth:`cosa.linear_algebra.scaling.Scaling.apply`
+                licenses: the feasible sets correspond, the objectives differ by a positive
+                factor, and the multipliers map back under a positive diagonal.
 
     Returns:
-        The solution, and whether a start had to be supplied.
+            The solution, and whether a start had to be supplied.
     """
     problem, witness = instance.problem, instance.witness
     if policy.scale:
@@ -258,7 +260,7 @@ def _run(instance: PortfolioInstance, policy: Policy = AS_SHIPPED) -> tuple[Solu
         problem, witness = factors.apply(problem), factors.scale_point(witness)
     try:
         return solver.solve(problem, regularization=policy.regularization, reuse=policy.reuse), False
-    except (NeedsPhaseOneError, ProblemError):
+    except (NeedsPhaseOneError, ProblemError):  # pragma: no cover - no family reaches this any more
         return (
             solver.solve(problem, start=witness, regularization=policy.regularization, reuse=policy.reuse),
             True,
@@ -298,7 +300,12 @@ def _outcome(
     )
 
 
-def study(assets: int = 20, *, seeds: Sequence[int] = (0, 1, 2)) -> tuple[Outcome, ...]:
+def study(
+    assets: int = 20,
+    *,
+    seeds: Sequence[int] = (0, 1, 2),
+    families: Mapping[str, Callable[..., PortfolioInstance]] = FAMILIES,
+) -> tuple[Outcome, ...]:
     """Solve every family at every seed and classify what happened.
 
     §12.4's first two items -- "result per family" and "behaviour at the apex and on
@@ -312,19 +319,29 @@ def study(assets: int = 20, *, seeds: Sequence[int] = (0, 1, 2)) -> tuple[Outcom
             studies use, because ``large`` builds a rank-``k`` covariance with ``k`` fixed at
             ten and refuses an instance it cannot make low-rank.
         seeds: which seeds to draw.
+        families: which families to study, defaulting to all of them. A subset is a
+            legitimate thing to ask for -- someone debugging one family wants exactly that,
+            and so does a test that needs the study to be *cheap* rather than exhaustive.
+            Note that ``large`` is what forces ``assets`` to twenty; a subset without it can
+            use a much smaller instance.
 
     Returns:
         One outcome per family and seed, in family order.
     """
     outcomes = []
-    for name, build in FAMILIES.items():
+    for name, build in families.items():
         for seed in seeds:
             solution, supplied = _run(build(assets, seed=seed))
             outcomes.append(_outcome(name, solution, supplied=supplied))
     return tuple(outcomes)
 
 
-def ablate(assets: int = 20, *, seed: int = 0) -> tuple[Ablation, ...]:
+def ablate(
+    assets: int = 20,
+    *,
+    seed: int = 0,
+    families: Mapping[str, Callable[..., PortfolioInstance]] = FAMILIES,
+) -> tuple[Ablation, ...]:
     """§12.4's fourth item: which mitigation addressed which failure, by removing it.
 
     Args:
@@ -332,13 +349,14 @@ def ablate(assets: int = 20, *, seed: int = 0) -> tuple[Ablation, ...]:
         seed: which draw to measure on. One rather than several, because an ablation is a
             controlled comparison and averaging it over seeds hides the instances where the
             mitigation is the difference between an answer and none.
+        families: which families to ablate over, defaulting to all of them.
 
     Returns:
         One ablation per mitigation and family.
     """
     results = []
     for mitigation, (on, off) in MITIGATIONS.items():
-        for name, build in FAMILIES.items():
+        for name, build in families.items():
             instance = build(assets, seed=seed)
             results.append(
                 Ablation(
@@ -351,25 +369,31 @@ def ablate(assets: int = 20, *, seed: int = 0) -> tuple[Ablation, ...]:
     return tuple(results)
 
 
-def report(assets: int = 20, *, seeds: Sequence[int] = (0, 1, 2)) -> str:
+def report(
+    assets: int = 20,
+    *,
+    seeds: Sequence[int] = (0, 1, 2),
+    families: Mapping[str, Callable[..., PortfolioInstance]] = FAMILIES,
+) -> str:
     """The whole study as text, for a document or a terminal.
 
     Args:
         assets: how many assets each instance has.
         seeds: which seeds to draw for the per-family half.
+        families: which families to study, defaulting to all of them.
 
     Returns:
         A report: every outcome, then every ablation that mattered, then the tally.
     """
-    outcomes = study(assets, seeds=seeds)
-    lines = [f"failure-mode study: {len(FAMILIES)} families, {len(seeds)} seed(s), {assets} assets", ""]
+    outcomes = study(assets, seeds=seeds, families=families)
+    lines = [f"failure-mode study: {len(families)} families, {len(seeds)} seed(s), {assets} assets", ""]
     lines += [str(outcome) for outcome in outcomes]
     tally: dict[str, int] = {}
     for outcome in outcomes:
         tally[outcome.verdict] = tally.get(outcome.verdict, 0) + 1
     lines += ["", "verdicts: " + ", ".join(f"{count} {verdict}" for verdict, count in sorted(tally.items())), ""]
     lines += ["ablations that mattered:"]
-    mattered = [ablation for ablation in ablate(assets, seed=seeds[0]) if ablation.mattered]
+    mattered = [ablation for ablation in ablate(assets, seed=seeds[0], families=families) if ablation.mattered]
     lines += [str(ablation) for ablation in mattered] or ["  none"]
     return "\n".join(lines)
 

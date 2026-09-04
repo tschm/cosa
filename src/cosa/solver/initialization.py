@@ -139,7 +139,13 @@ def _free_head_variables(problem: SOCP) -> tuple[int, ...] | None:
     for block in problem.cone.slices:
         row = problem.G[block][0]
         selected = np.flatnonzero(row)
-        if selected.size != 1 or row[selected[0]] != 1.0:
+        # Any single nonzero coefficient will do, not only one. The head is
+        # `coefficient * point[variable] + h_head` and solving `head >= ||tail||` for the
+        # variable is one division either way. Requiring exactly 1.0 was the original test
+        # and it made the routine refuse every *equilibrated* instance, since §13.3 rescales
+        # the head row by a positive factor -- which is how #37's public interface, whose
+        # default is to equilibrate, found this.
+        if selected.size != 1 or row[selected[0]] == 0.0:
             return None
         variable = int(selected[0])
         elsewhere = (
@@ -185,11 +191,14 @@ def raise_free_heads(problem: SOCP, z: Vector, *, margin: float = 0.0) -> Vector
             "repaired by raising it. Supply a feasible start instead",
         )
     for block, variable in zip(problem.cone.slices, heads, strict=True):
-        # The head row selects `variable` with coefficient one and `variable` appears in no
-        # other row, so the tail does not depend on it and the head is
-        # `point[variable] + h_head`. Solving `head >= ||tail|| + margin` is one assignment.
+        # The head row selects `variable` alone and `variable` appears in no other row, so
+        # the tail does not depend on it and the head is
+        # `coefficient * point[variable] + h_head`. Solving `head >= ||tail|| + margin` is
+        # one division.
+        coefficient = float(problem.G[block][0][variable])
         tail = (problem.G[block] @ point + problem.h[block])[1:]
-        point[variable] = float(np.linalg.norm(tail)) + margin - float(problem.h[block][0])
+        wanted = float(np.linalg.norm(tail)) + margin - float(problem.h[block][0])
+        point[variable] = wanted / coefficient
     return point
 
 

@@ -42,6 +42,8 @@ PUBLIC_SURFACE = [
     "MeanStdForm",
     "MeanStdPortfolio",
     "Multipliers",
+    "NotOptimalError",
+    "Portfolio",
     "ProblemError",
     "RowLayout",
     "Scaling",
@@ -50,11 +52,17 @@ PUBLIC_SURFACE = [
     "SingularKktError",
     "Vector",
     "WorkingSet",
+    "solve_portfolio",
 ]
 
 # What the root deliberately does *not* re-export: the routines. They are reached as
 # `cosa.geometry.soc.is_boundary` or `cosa.active_set.updates.removal_candidate`, because
 # a name like `slack` or `position` only means something next to its module.
+#
+# `solve_portfolio` is the one routine that *is* at the root, and it is there for the same
+# reason the others are not: readability. It is Deliberable 5's public interface, and a
+# front door that had to be found at `cosa.api.solve_portfolio` would be a front door
+# nobody uses.
 NOT_AT_THE_ROOT = [
     "Factorization",
     "WarmStart",
@@ -87,15 +95,22 @@ NOT_AT_THE_ROOT = [
 # library, not part of what the library offers, so none of it reaches the root either.
 NOT_THE_LIBRARY = [
     "Ablation",
+    "Accuracy",
+    "Comparison",
+    "Frontier",
+    "Performance",
+    "Point",
     "CrossCheck",
     "CvxpySolver",
     "PortfolioInstance",
     "RandomSpec",
     "Outcome",
     "ablate",
+    "benchmark",
     "cross_check",
     "random_instance",
     "solve_reference",
+    "sweep",
 ]
 
 

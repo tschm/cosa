@@ -9,7 +9,11 @@ Modules (each owned by its own issue):
     failures: §12.4's failure-mode and degeneracy study -- every family classified, every
         switchable mitigation ablated. Landed; its narrative is
         ``docs/development/failure-modes.md``.
-    frontier: The efficient-frontier sequence over lambda, which is where warm
-        starting either pays off or does not.
-    benchmarks: Comparison against reference SOCP solvers.
+    frontier: §11's efficient-frontier sequence over lambda, solved cold and warm, which
+        is where warm starting either pays off or does not. Landed.
+    benchmarks: §12's comparison against reference SOCP solvers, in four modes with both
+        metric tables. Landed.
+
+Deliverable 9's reproducible rerun is ``python -m cosa.experiments``, which writes every
+study's artifact under ``docs/experiments`` along with the environment that produced it.
 """

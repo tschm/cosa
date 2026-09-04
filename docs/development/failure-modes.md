@@ -18,20 +18,20 @@ print(failures.report())
 
 ## The result
 
-Thirteen families, three seeds each, twenty assets. **Thirty-six solved, three diagnosed,
-none undiagnosed.**
+Thirteen families, three seeds each, twenty assets. **All thirty-nine solved.**
 
 | verdict | meaning | count |
 | --- | --- | --- |
-| `solved` | optimal, and §6's five residuals certify it | 36 |
+| `solved` | optimal, and §6's five residuals certify it | 39 |
 | `loose` | the loop called it optimal, the residuals do not quite agree | 0 |
-| `diagnosed` | stopped, and named what happened | 3 |
+| `diagnosed` | stopped, and named what happened | 0 |
 | `undiagnosed` | the iteration limit, which names nothing | 0 |
 
-The distinction between the last two is the point of the study. `degenerate`, `stalled` and
-`blocked-at-apex` each name a specific thing that happened and each has an issue behind it;
-`iteration_limit` is the solver saying it does not know. That none of the thirty-nine solves
-ends there is the strongest single statement in this document.
+The distinction between the last two is still the point of the study, even though both
+columns are now empty. `degenerate`, `stalled` and `blocked-at-apex` each name a specific
+thing that happened and each has an issue behind it; `iteration_limit` is the solver saying
+it does not know. Keeping them apart is what let the one failure below be diagnosed
+correctly — and the first diagnosis was wrong.
 
 ## Per family
 
@@ -49,7 +49,7 @@ ends there is the strongest single statement in this document.
 | nearly active cone | solved | 5e-11 | 90 | §8.2's band |
 | degenerate optimum | solved | 2e-16 | 4 | dependent active set |
 | many active bounds | solved | 1e-10 | 42 | |
-| badly scaled | **stalled** | 5e-2 | 29 | see below |
+| badly scaled | solved | 1e-11 | 1000 (the whole budget) | see below |
 
 ### Behaviour at the apex
 
@@ -95,38 +95,60 @@ singular-KKT guard never fired, because LAPACK raises only on an exactly zero pi
 dependent set gives `1e-18`. The guard became an explicit rank test. The family existed for
 about ten minutes before it earned its place.
 
-## The one failure: `badly scaled`
+## The failure that was not what it looked like: `badly scaled`
 
-The only family that does not solve, at all three seeds, with residuals around `5e-2`
-to `8e-2`. It stalls: the retraction can find no step that improves the objective, and the
-multiplier tests have nothing to drop.
+This section had a different conclusion two waves ago, and how it changed is more useful
+than what it now says.
 
-**§13.3's Ruiz equilibration is the mitigation, and the evidence is before-and-after.**
+`badly scaled` puts a constraint matrix spanning fourteen orders of magnitude in front of
+the solver. It used to **stall** at all three seeds, with residuals around `5e-2`, and
+§13.3's Ruiz equilibration rescued it — `stalled` at `5e-2` became `optimal` at `9.7e-7`.
+That is a clean before-and-after and it pointed at conditioning, so equilibration became the
+mitigation for this family and, briefly, the default for the public interface.
+
+**It was the wrong diagnosis.** Building that public interface exposed the real cause.
+`raise_free_heads` — the routine that repairs conic feasibility by setting `t = ||Lx||` —
+required the cone's head row to select its variable with a coefficient of *exactly one*:
+
+```python
+if selected.size != 1 or row[selected[0]] != 1.0:
+    return None
+```
+
+Nothing needs that. The head is `coefficient * t + h_head` and solving `head >= ||tail||`
+for `t` is one division whatever the coefficient is. But `badly_scaled`'s head row does not
+have a unit coefficient, so the routine refused, `_heads_are_free` reported `False`, **the
+retraction was silently unavailable**, and an iterate on the cone's boundary could not move
+at all. That is not a conditioning failure. It is Risk 1 — the boundary-immobility result —
+arriving with its remedy switched off.
+
+With the restriction removed:
 
 | | verdict | residual | iterations |
 | --- | --- | --- | --- |
-| as given | `stalled` | 5.0e-2 | 29 |
-| equilibrated | `optimal` | 9.7e-7 | 1000 (the whole budget) |
+| as given | `optimal` | **1e-11** | 5000 |
+| equilibrated | `optimal` | 9.7e-7 | 5000, and one seed hits the limit |
 
-`badly scaled` is also the only family where [#29](https://github.com/tschm/cosa/issues/29)'s
-anti-cycling guard actually arms: at seeds 1 and 2 the solve returns to a single working set
-nine and four times respectively, past the threshold that switches §7.2's most-violating rule
-for Bland's. Twelve of the thirteen families never return to a working set at all. That the
-guard arms exactly where the conditioning is worst is the expected relationship — and those
-solves still terminate, with a diagnosis rather than an iteration limit, which is what the
-guard promises.
+The family solves to eleven digits without help, and **equilibrating makes it five orders of
+magnitude worse.** Equilibration was never fixing the conditioning; it was perturbing the
+head row's coefficient, which is a different thing entirely and worked by accident.
 
-Equilibration converts a stall into a certified optimum. It is not a comfortable win — the
-solve uses its entire iteration budget and lands just inside §6's `1e-6` tolerance — and
-saying so is more useful than reporting "solved". What it establishes is that the failure is
-one of *conditioning* rather than of the algorithm: the same iteration, on the same problem
-written in better units, converges.
+Three things follow.
 
-This also settles where [#28](https://github.com/tschm/cosa/issues/28)'s scaling earns its
-keep. Not on ill-conditioned covariances — `ill conditioned` has `cond(Sigma) ≈ 1e10` and
-solves without help, for the single-row reason above. On **unit mismatch**, where the
-constraint matrix's entries span fourteen orders of magnitude and the equilibration brings
-the KKT condition number from `2e14` to about `10`.
+- **The public interface does not equilibrate.** `solve_portfolio(..., scale=False)` is the
+  default; the flag remains for a caller whose units are genuinely pathological.
+- **§13.3's scaling has no family it rescues.** It costs between 30% and 80% more iterations
+  on every family and changes no verdict. That is a real result about this formulation and
+  it is consistent with an earlier one: the KKT system does not inherit the covariance's
+  conditioning, because the tangent puts `L` in as a single row. There is less conditioning
+  here to fix than there looks to be.
+- **A "diagnosed" stop is a hypothesis, not a conclusion.** `stalled` named the symptom
+  correctly and the study attributed it to the wrong cause, for two waves, with a
+  before-and-after table apparently confirming it. The ablation was sound; what it measured
+  was a coincidence.
+
+`badly scaled` still costs the entire iteration budget, which is the honest remaining
+caveat: it converges, and slowly.
 
 ## Which mitigation addressed which failure
 
@@ -134,11 +156,14 @@ the KKT condition number from `2e14` to about `10`.
 
 | mitigation | changed an outcome | changed the cost |
 | --- | --- | --- |
-| §13.3 Ruiz equilibration | **yes** — `badly scaled`, `stalled` → `optimal` | slower, and worth it |
 | §8.3 regularization | no | no |
-| §13.2 factorization reuse | no | factorizations 98.9% → 1.4% of solves |
+| §13.2 factorization reuse | no | factorizations 98.9% → 1.4%, iterations +30% |
+| §13.3 Ruiz equilibration | no | iterations +30% to +80%, and one residual five orders worse |
 
-Two things this table says that are easy to miss.
+**No mitigation changes an outcome any more**, which is a stronger statement than the one
+this table used to make. Everything solves without help.
+
+Two more things it says that are easy to miss.
 
 **§8.3's regularization never changes an outcome, and that is the right result rather than a
 disappointing one.** The loop tries dependent-row *removal* first and falls back to
@@ -146,10 +171,12 @@ regularization only when the dependency lies among rows it may not drop — equa
 the cone's own rows. On these families removal always succeeds. Regularization is the
 answer to a nearby question and it is correct that the solver never has to ask one.
 
-**§13.2's reuse changes no verdict by design.** It is a cost policy, not a numerical one: it
-computes the same direction by a different route, agreeing to `1e-16`. Its effect is the
-factorization counter, and it is measured in
-[architecture.md](architecture.md#what-reuse-turned-out-to-be-worth) rather than here.
+**§13.2's reuse changes no verdict by design, and does change the iteration count.** It is a
+cost policy, not a numerical one: it computes the same direction by a different route,
+agreeing to `1e-16` at any given point. But agreeing to `1e-16` is not agreeing exactly, and
+over a few hundred iterations the two trajectories separate — about 30% more iterations
+under reuse on these families, against 98.9% fewer factorizations. Both halves are in
+[architecture.md](architecture.md#what-reuse-turned-out-to-be-worth).
 
 ## What is not ablated, and why
 
@@ -171,9 +198,9 @@ Their before-and-after evidence lives in `tests/test_conic_logic.py` and
 
 ## Open
 
-- **`badly scaled` needs equilibration to be applied**, and the solver does not apply it.
-  Whether it should is [#37](https://github.com/tschm/cosa/issues/37)'s question, since it
-  is a decision about the public interface rather than about the algorithm.
+- **`badly scaled` converges, and spends the whole iteration budget doing it.** It is no
+  longer a robustness failure; it is the slow-convergence question below wearing a different
+  hat.
 - **`blocked-at-apex` on 3 of 200 randomized instances.** [#39](https://github.com/tschm/cosa/issues/39).
   Not a tolerance problem and not fixable by a working-set rule; the release the multiplier
   authorizes is arithmetically unavailable.

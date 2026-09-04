@@ -1,0 +1,31 @@
+frontier: 24 points, 877 cold iterations -> 796 warm (9% saved), answers agree
+  20 point(s) with the working set unchanged: +18%
+  4 point(s) that had to correct it:        -17%
+
+lam=  0.500  optimal   iters    44 ->    44 (saved    +0)  +  8/-  0 rows  fact    1 ->   1  residual  1.5e-10  return   0.0832  sd  0.0410
+lam=  0.564  optimal   iters    38 ->    32 (saved    +6)  +  0/-  0 rows  fact    1 ->   1  residual  1.2e-10  return   0.0830  sd  0.0407
+lam=  0.636  optimal   iters    36 ->    28 (saved    +8)  +  0/-  0 rows  fact    1 ->   0  residual  2.0e-10  return   0.0829  sd  0.0404
+lam=  0.718  optimal   iters    28 ->    27 (saved    +1)  +  0/-  0 rows  fact    1 ->   0  residual  1.9e-10  return   0.0827  sd  0.0402
+lam=  0.810  optimal   iters    30 ->    23 (saved    +7)  +  0/-  0 rows  fact    1 ->   0  residual  2.3e-10  return   0.0826  sd  0.0401
+lam=  0.914  optimal   iters    30 ->    24 (saved    +6)  +  0/-  0 rows  fact    1 ->   0  residual  1.7e-10  return   0.0825  sd  0.0400
+lam=  1.031  optimal   iters    70 ->    69 (saved    +1)  +  0/-  1 rows  fact    1 ->   0  residual  1.0e-10  return   0.0824  sd  0.0398
+lam=  1.163  optimal   iters    49 ->    80 (saved   -31)  +  0/-  1 rows  fact    1 ->   0  residual  6.6e-10  return   0.0803  sd  0.0379
+lam=  1.312  optimal   iters    43 ->    42 (saved    +1)  +  0/-  0 rows  fact    1 ->   0  residual  2.0e-10  return   0.0787  sd  0.0366
+lam=  1.480  optimal   iters    41 ->    35 (saved    +6)  +  0/-  0 rows  fact    1 ->   0  residual  1.1e-10  return   0.0774  sd  0.0357
+lam=  1.669  optimal   iters    34 ->    30 (saved    +4)  +  0/-  0 rows  fact    1 ->   0  residual  6.1e-10  return   0.0763  sd  0.0350
+lam=  1.883  optimal   iters    34 ->    25 (saved    +9)  +  0/-  0 rows  fact    1 ->   0  residual  2.5e-10  return   0.0754  sd  0.0345
+lam=  2.124  optimal   iters    33 ->    22 (saved   +11)  +  0/-  0 rows  fact    1 ->   0  residual  2.3e-10  return   0.0746  sd  0.0341
+lam=  2.396  optimal   iters    56 ->    63 (saved    -7)  +  0/-  1 rows  fact    1 ->   0  residual  4.0e-10  return   0.0737  sd  0.0337
+lam=  2.703  optimal   iters    44 ->    35 (saved    +9)  +  0/-  0 rows  fact    1 ->   0  residual  7.0e-10  return   0.0722  sd  0.0331
+lam=  3.050  optimal   iters    41 ->    31 (saved   +10)  +  0/-  0 rows  fact    1 ->   0  residual  4.7e-10  return   0.0709  sd  0.0327
+lam=  3.440  optimal   iters    34 ->    30 (saved    +4)  +  0/-  0 rows  fact    1 ->   0  residual  1.7e-10  return   0.0699  sd  0.0323
+lam=  3.881  optimal   iters    40 ->    29 (saved   +11)  +  0/-  0 rows  fact    1 ->   0  residual  1.2e-10  return   0.0689  sd  0.0321
+lam=  4.378  optimal   iters    35 ->    24 (saved   +11)  +  0/-  0 rows  fact    1 ->   0  residual  1.2e-10  return   0.0681  sd  0.0319
+lam=  4.939  optimal   iters    25 ->    25 (saved    +0)  +  0/-  0 rows  fact    1 ->   0  residual  2.8e-11  return   0.0674  sd  0.0317
+lam=  5.572  optimal   iters    24 ->    20 (saved    +4)  +  0/-  0 rows  fact    1 ->   0  residual  9.8e-11  return   0.0668  sd  0.0316
+lam=  6.286  optimal   iters    23 ->    20 (saved    +3)  +  0/-  0 rows  fact    1 ->   0  residual  7.4e-11  return   0.0663  sd  0.0315
+lam=  7.091  optimal   iters    22 ->    21 (saved    +1)  +  0/-  0 rows  fact    1 ->   0  residual  5.6e-11  return   0.0658  sd  0.0314
+lam=  8.000  optimal   iters    23 ->    17 (saved    +6)  +  0/-  0 rows  fact    1 ->   0  residual  4.3e-11  return   0.0654  sd  0.0314
+
+warm totals: 796 iters, 11 active-set changes, 2 factorizations, 796 KKT solves, worst residual 7.03e-10
+monotone frontier: True

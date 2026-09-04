@@ -329,50 +329,45 @@ def test_regularization_lets_the_direction_solve_proceed_where_removal_cannot():
 
 
 # ----------------------------------------------------------------------------------
-# What it cannot do yet, said out loud
+# The cone, now that #20 activates it
 # ----------------------------------------------------------------------------------
 
 
-def test_a_portfolio_stalls_at_the_cone_because_the_cone_is_never_activated():
-    """The exact remaining gap, and #20 is what closes it.
+def test_a_portfolio_now_solves_rather_than_stalling():
+    """The gap Wave 5 documented, closed by #20.
 
-    The step interval of #18 now keeps every iterate inside the cone -- Level 1 holds
-    throughout, and the invariant checker is on. But the loop never *activates* the cone, so
-    the working set has no tangent row, the direction keeps pointing out of the cone, and
-    the exact step is zero. The loop runs to its iteration limit without moving.
-
-    Asserted rather than left to be discovered: a stall that produced a wrong answer with an
-    `optimal` status would be far worse than one that says `iteration_limit`, and this is
-    what makes the difference visible.
+    Wave 5's version of this test asserted the *stall*: the step interval kept every iterate
+    inside the cone, but nothing activated it, so the working set had no tangent row, the
+    direction pointed out of the cone, and the exact step was zero. §7.3's activation is what
+    was missing, and `test_prototype.py` is where the consequence is tested properly.
     """
     instance = families.basic(5, seed=0)
     solution = cosa.solve(instance.problem, checker=CHECKED)
-
-    assert solution.status == "iteration_limit"
-    assert solution.working_set.status(0) is ConeStatus.INACTIVE, "the cone was never activated"
-    assert solution.residuals.primal < 1e-9, "and yet every iterate stayed feasible"
-    assert solution.residuals.stationarity > 1e-3, "which is why it is not optimal"
+    assert solution.is_optimal, str(solution)
+    assert solution.working_set.status(0) is ConeStatus.TANGENT
 
 
-def test_the_stall_keeps_every_iterate_feasible():
-    """§14.1 holds even where the loop cannot make progress.
+def test_a_randomized_instance_solves_or_says_why_not():
+    """On an instance nobody chose, and the honest range of outcomes.
 
-    The distinction worth having: not converging and being *wrong* are different failures,
-    and the invariant is what separates them. #20 fixes the first; the second never happened.
+    Not every randomized draw converges -- a rank-one covariance puts the optimum at the
+    apex, where #24's branch can report `blocked-at-apex` rather than an answer. What is
+    asserted here is that every outcome is *feasible* and *named*, which is the difference
+    between a limitation and a bug.
     """
-    from cosa.solver.instrumentation import level_1_violations
+    for seed in (1, 2, 5, 7, 42):
+        instance = randomized.random_instance(seed)
+        solution = cosa.solve(instance.problem, max_iterations=200)
+        assert solution.status in {
+            "optimal",
+            "iteration_limit",
+            "degenerate",
+            "stalled",
+            "blocked-at-apex",
+        }, f"seed {seed}: {solution.status}"
+        from cosa.solver.instrumentation import level_1_violations
 
-    for instance in (families.basic(5, seed=0), families.box(5, seed=0)):
-        solution = cosa.solve(instance.problem, checker=CHECKED, max_iterations=20)
-        assert level_1_violations(instance.problem, solution.z) == (), instance.name
-
-
-def test_a_randomized_instance_stalls_the_same_way():
-    """The same boundary on an instance nobody chose."""
-    instance = randomized.random_instance(3)
-    solution = cosa.solve(instance.problem, checker=CHECKED, max_iterations=20)
-    assert solution.status == "iteration_limit"
-    assert solution.working_set.status(0) is ConeStatus.INACTIVE
+        assert level_1_violations(instance.problem, solution.z) == (), f"seed {seed}"
 
 
 def test_phase_one_runs_on_a_coned_instance():

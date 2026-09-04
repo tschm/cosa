@@ -5,8 +5,11 @@ Modules (each owned by its own issue):
         exact membership and normal-cone conditions. Landed.
     instrumentation: The counters §11 and §12.3 promise to measure, and the per-iterate
         assertions of §14's Levels 1 and 2. Landed.
-    cosa: The iteration itself.
-    initialization: Feasible starting points, and warm starts from a previous
-        solution, working set, multipliers and factorizations.
-    termination: The conic KKT residuals that constitute the stopping criterion.
+    initialization: Feasible starting points, by three routes ending in an elastic
+        Phase I the solver runs on itself. Landed; warm starts from a previous solution
+        are #30's.
+    termination: The five conic KKT residuals of §6 that constitute the stopping
+        criterion. Landed.
+    cosa: The iteration itself -- §9 Phase III's four ingredients wired together.
+        Landed, with activation only; §7.4's deactivation is #23's.
 """

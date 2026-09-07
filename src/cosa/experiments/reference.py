@@ -137,6 +137,12 @@ The SCS figure is measured rather than assumed. Over 200 randomized instances fr
 Holding SCS to ``1e-6`` would therefore fail one comparison in four for no reason that has
 anything to do with COSA; ``1e-4`` is its own documented accuracy and bounds what was
 observed with an order of magnitude to spare.
+
+Those two figures were measured against SCS ``3.2.11``, and they move with the solver:
+SCS ``3.3.1`` brings the worst of the two hundred, seed ``76``, from ``9.8e-6`` down to
+``2.2e-7``. That is why the bound and not the measurement is what the suite asserts --
+``1e-4`` still bounds SCS, and a release that improves on it must not read as a
+regression. See ``test_the_worst_sampled_disagreement_is_still_inside_the_tolerance``.
 """
 
 

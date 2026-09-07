@@ -220,13 +220,24 @@ def test_the_worst_sampled_disagreement_is_still_inside_the_tolerance():
 
     Kept as a regression net around :data:`cosa.experiments.reference.BACKEND_ACCURACY`,
     and asked of SCS explicitly: the default cross-check no longer includes it.
+
+    The bound is asserted, not the gap. This test used to also require the gap here to
+    *exceed* `OBJECTIVE_TOLERANCE` -- "this instance is why the tolerance widens" -- and
+    that is a claim about an SCS build rather than about COSA: the `9.8e-6` measured
+    below was SCS `3.2.11`, and `3.3.1` solves this same instance to `2.2e-7`, four
+    times *inside* the tolerance the assertion said it had to exceed. A better SCS is
+    not a regression, so a floor under SCS's error has no business failing the suite.
+    Same reasoning as `test_scs_is_not_a_peer_and_seed_605467_is_why` states for itself:
+    absolute figures depend on which solver versions are installed. What survives every
+    SCS release is that a first-order participant widens the tolerance, and that the
+    widened tolerance still holds -- which is what `BACKEND_ACCURACY` claims and all
+    this seed was ever kept to check.
     """
     instance = randomized.random_instance(76)
     solvers = reference.available_solvers()
     if len(solvers) < 2:
         pytest.skip("only one reference solver is installed, so there is nothing to disagree")
     check = reference.cross_check(instance.problem, name="s76", solvers=solvers)
-    assert check.gap > reference.OBJECTIVE_TOLERANCE, "this instance is why the tolerance widens"
     assert check.agrees, str(check)
     assert check.tolerance > check.requested_tolerance
 

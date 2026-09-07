@@ -7,7 +7,9 @@ classifiers = [
     "Programming Language :: Python :: 3.14",
 ]
 name = "cosa"
-version = "0.1.0"
+# Derived from the git tag by hatch-vcs (see [tool.hatch.version]) rather than written
+# here, so the tag is the single source of truth and no commit can disagree with it.
+dynamic = ["version"]
 description = "Convex optimisation sandbox."
 readme = "README.md"
 authors = [
@@ -20,8 +22,28 @@ dependencies = [
 ]
 
 [build-system]
-requires = ["uv_build>=0.12.7,<0.13.0"]
-build-backend = "uv_build"
+# Was uv_build. Swapped to hatchling because uv_build cannot derive the version from the
+# VCS -- it requires [project].version to be written down -- and hatch-vcs, the plugin
+# that can, is a hatchling plugin. No uv_build-specific settings were configured
+# ([tool.uv.build-backend] was absent), so nothing else had to move.
+requires = ["hatchling", "hatch-vcs"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+# uv_build inferred this from the src/<name> convention; hatchling is told explicitly.
+packages = ["src/cosa"]
+
+[tool.hatch.version]
+# Resolves [project].dynamic = ["version"] from `git describe`. Tags are vX.Y.Z and
+# hatch-vcs strips the leading "v" by default, so v0.1.0 builds 0.1.0; a commit off the
+# tag builds a PEP 440 dev version (0.1.1.devN+g<sha>).
+#
+# This repo had NO tags at all until v0.1.0 was created alongside this change -- without
+# one, hatch-vcs does not fail, it silently builds 0.1.dev1+g<sha>. The same applies to
+# a shallow clone that cannot see the tag; every checkout in rhiza_release.yml uses
+# fetch-depth: 0, and its "Verify built distribution matches the tag" step parses the
+# filename in dist/ and fails the release unless it carries the tag.
+source = "vcs"
 
 [project.urls]
 Homepage = "https://github.com/tschm/cosa"
@@ -65,14 +87,23 @@ test = [
     "pytest-cov>=5.0",
 ]
 
+[tool.rhiza-task]
+# Pinned when [project].version became dynamic. This repo carried no [tool.rhiza-task]
+# at all, so the gate took the rhiza CLI default -- and every pytest-rhiza up to and
+# including 0.5.0 reads `project["version"]` unconditionally, so a derived version fails
+# test_version_follows_semver (empty string against the semver regex) and the git-tag
+# comparison (InvalidVersion on ""). 0.6.0 is the first release that asks whether the
+# version is dynamic and skips those two assertions.
+pytest-rhiza = "pytest-rhiza==0.6.0"
+
 [tool.bumpversion]
-current_version = "0.1.0"
+# `current_version = "0.1.0"` and the [[tool.bumpversion.files]] entry that rewrote
+# [project].version are both gone: the version is dynamic (see [tool.hatch.version]), so
+# there is nothing written anywhere to read or rewrite, and ignore_missing_version
+# defaults to false -- leaving the entry would have made the next bump a hard failure.
+# The table stays because bump-my-version still has to *discover* a config: from a path
+# it never reads it falls back to `git describe` and can cut a release at a version that
+# already exists.
 tag = false
 commit = false
 allow_dirty = false
-
-[[tool.bumpversion.files]]
-filename = "pyproject.toml"
-regex = true
-search = '(?ms)^\[project\]((?:(?!^\[)[\s\S])*?)^version = "{current_version}"'
-replace = '[project]\1version = "{new_version}"'

@@ -2,6 +2,17 @@
 license = "MIT"
 license-files = ["LICENSE"]
 classifiers = [
+    # Not a PyPI-registered classifier but a recognised convention, and load-bearing
+    # here: rhiza_release.yml's "Check if dist contains artifacts and not marked as
+    # private" step greps pyproject.toml for this exact string and skips the PyPI
+    # publish job when it is present.
+    #
+    # Without it, pushing a vX.Y.Z tag would fire a real release and attempt to publish
+    # `cosa` to PyPI -- a name already held by an unrelated project (latest 0.4), so the
+    # upload would fail after the GitHub release had been cut. This repo has no tags
+    # older than v0.1.0 and has never published, so opting out is the accurate statement,
+    # not a restriction.
+    "Private :: Do Not Upload",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Programming Language :: Python :: 3.14",

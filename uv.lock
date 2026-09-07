@@ -125,7 +125,6 @@ wheels = [
 
 [[package]]
 name = "cosa"
-version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "numpy" },
@@ -159,16 +158,18 @@ test = [
 
 [package.metadata]
 requires-dist = [
+    { name = "clarabel", marker = "extra == 'gurobi'", specifier = ">=0.9" },
+    { name = "clarabel", marker = "extra == 'mosek'", specifier = ">=0.9" },
     { name = "clarabel", marker = "extra == 'reference'", specifier = ">=0.9" },
-    { name = "cosa", extras = ["reference"], marker = "extra == 'gurobi'" },
-    { name = "cosa", extras = ["reference"], marker = "extra == 'mosek'" },
+    { name = "cvxpy", marker = "extra == 'gurobi'", specifier = ">=1.5" },
+    { name = "cvxpy", marker = "extra == 'mosek'", specifier = ">=1.5" },
     { name = "cvxpy", marker = "extra == 'reference'", specifier = ">=1.5" },
     { name = "gurobipy", marker = "extra == 'gurobi'", specifier = ">=11" },
     { name = "mosek", marker = "extra == 'mosek'", specifier = ">=10" },
     { name = "numpy", specifier = ">=1.26" },
     { name = "scipy", specifier = ">=1.11.2" },
 ]
-provides-extras = ["reference", "mosek", "gurobi"]
+provides-extras = ["gurobi", "mosek", "reference"]
 
 [package.metadata.requires-dev]
 test = [

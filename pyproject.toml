@@ -28,7 +28,7 @@ authors = [
 ]
 requires-python = ">=3.12"
 dependencies = [
-    "numpy>=1.26",
+    "numpy>=2.5.3",
     "scipy>=1.11.2",
 ]
 
@@ -72,7 +72,7 @@ reference = [
 ]
 mosek = [
     "cosa[reference]",
-    "mosek>=10",
+    "mosek>=11.2.4",
 ]
 gurobi = [
     "cosa[reference]",
@@ -93,7 +93,7 @@ DEP002 = ["clarabel", "gurobipy", "mosek"]
 test = [
     "clarabel>=0.9",
     "cvxpy>=1.5",
-    "hypothesis>=6.100",
+    "hypothesis>=6.168.0",
     "pytest>=8.0",
     "pytest-cov>=5.0",
 ]

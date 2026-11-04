@@ -1,5 +1,5 @@
 version = 1
-revision = 5
+revision = 3
 requires-python = ">=3.12"
 
 [[package]]
@@ -161,12 +161,12 @@ requires-dist = [
     { name = "clarabel", marker = "extra == 'gurobi'", specifier = ">=0.9" },
     { name = "clarabel", marker = "extra == 'mosek'", specifier = ">=0.9" },
     { name = "clarabel", marker = "extra == 'reference'", specifier = ">=0.9" },
-    { name = "cvxpy", marker = "extra == 'gurobi'", specifier = ">=1.9.3" },
-    { name = "cvxpy", marker = "extra == 'mosek'", specifier = ">=1.9.3" },
-    { name = "cvxpy", marker = "extra == 'reference'", specifier = ">=1.9.3" },
+    { name = "cvxpy", marker = "extra == 'gurobi'", specifier = ">=1.5" },
+    { name = "cvxpy", marker = "extra == 'mosek'", specifier = ">=1.5" },
+    { name = "cvxpy", marker = "extra == 'reference'", specifier = ">=1.5" },
     { name = "gurobipy", marker = "extra == 'gurobi'", specifier = ">=11" },
-    { name = "mosek", marker = "extra == 'mosek'", specifier = ">=11.2.7" },
-    { name = "numpy", specifier = ">=2.5.4" },
+    { name = "mosek", marker = "extra == 'mosek'", specifier = ">=10" },
+    { name = "numpy", specifier = ">=1.26" },
     { name = "scipy", specifier = ">=1.11.2" },
 ]
 provides-extras = ["gurobi", "mosek", "reference"]
@@ -174,9 +174,9 @@ provides-extras = ["gurobi", "mosek", "reference"]
 [package.metadata.requires-dev]
 test = [
     { name = "clarabel", specifier = ">=0.9" },
-    { name = "cvxpy", specifier = ">=1.9.3" },
-    { name = "hypothesis", specifier = ">=6.170.14" },
-    { name = "pytest", specifier = ">=9.2.0" },
+    { name = "cvxpy", specifier = ">=1.5" },
+    { name = "hypothesis", specifier = ">=6.100" },
+    { name = "pytest", specifier = ">=8.0" },
     { name = "pytest-cov", specifier = ">=5.0" },
 ]
 
